@@ -5,6 +5,7 @@ const SellerProfile = require('./sellerProfile.model');
 const BuyerProfile  = require('./buyerProfile.model');
 const Category      = require('./category.model');
 const Service       = require('./service.model');
+const Job           = require('./job.model');
 
 // ── Associations ──────────────────────────────────────────
 
@@ -24,6 +25,10 @@ Service.belongsTo(User, { foreignKey: 'seller_id', as: 'seller' });
 Category.hasMany(Service, { foreignKey: 'category_id', as: 'services' });
 Service.belongsTo(Category, { foreignKey: 'category_id', as: 'category' });
 
+// User ↔ Jobs (1:many)
+User.hasMany(Job, { foreignKey: 'buyer_id', as: 'jobs' });
+Job.belongsTo(User, { foreignKey: 'buyer_id', as: 'buyer' });
+
 // ─────────────────────────────────────────────────────────
 
 const db = {
@@ -33,6 +38,7 @@ const db = {
   BuyerProfile,
   Category,
   Service,
+  Job,
 };
 
 module.exports = db;

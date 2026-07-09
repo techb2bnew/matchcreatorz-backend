@@ -76,6 +76,22 @@ const User = sequelize.define('User', {
     defaultValue: false,
   },
 
+  // Profile fields
+  bio: {
+    type:      DataTypes.TEXT,
+    allowNull: true,
+  },
+
+  location: {
+    type:      DataTypes.STRING(150),
+    allowNull: true,
+  },
+
+  avatar: {
+    type:      DataTypes.STRING(500),
+    allowNull: true,
+  },
+
   reset_token: {
     type:      DataTypes.STRING(255),
     allowNull: true,

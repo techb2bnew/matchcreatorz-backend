@@ -1,0 +1,266 @@
+'use strict';
+const { Job, User } = require('../../models');
+const { Op }        = require('sequelize');
+
+const BUYER_ATTRS = ['id', 'name', 'email'];
+
+// ── List buyer's own jobs ─────────────────────────────────────────────
+/**
+ * @swagger
+ * /api/v1/buyer/jobs:
+ *   get:
+ *     summary: List my posted jobs
+ *     tags: [Buyer - Jobs]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [OPEN, IN_PROGRESS, CLOSED, CANCELLED] }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20 }
+ *     responses:
+ *       200:
+ *         description: Paginated job list
+ */
+exports.listMyJobs = async (req, res) => {
+  try {
+    const { status, page = 1, limit = 20 } = req.query;
+    const where = { buyer_id: req.user.id };
+    if (status) where.status = status;
+
+    const offset = (Number(page) - 1) * Number(limit);
+    const { count, rows } = await Job.findAndCountAll({
+      where,
+      order: [['created_at', 'DESC']],
+      limit: Number(limit),
+      offset,
+    });
+
+    return res.json({
+      success: true,
+      data: rows,
+      pagination: { total: count, page: Number(page), limit: Number(limit), pages: Math.ceil(count / Number(limit)) },
+    });
+  } catch (err) {
+    console.error('listMyJobs:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ── Get single job ────────────────────────────────────────────────────
+/**
+ * @swagger
+ * /api/v1/buyer/jobs/{id}:
+ *   get:
+ *     summary: Get a single job by ID
+ *     tags: [Buyer - Jobs]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Job details
+ *       404:
+ *         description: Not found
+ */
+exports.getJob = async (req, res) => {
+  try {
+    const job = await Job.findOne({ where: { id: req.params.id, buyer_id: req.user.id } });
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+    return res.json({ success: true, data: job });
+  } catch (err) {
+    console.error('getJob:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ── Create job ────────────────────────────────────────────────────────
+/**
+ * @swagger
+ * /api/v1/buyer/jobs:
+ *   post:
+ *     summary: Post a new job
+ *     tags: [Buyer - Jobs]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [title, category]
+ *             properties:
+ *               title:            { type: string }
+ *               description:      { type: string }
+ *               category:         { type: string }
+ *               job_type:         { type: string, enum: [fixed, hourly] }
+ *               budget_min:       { type: number }
+ *               budget_max:       { type: number }
+ *               deadline:         { type: string, format: date }
+ *               skills:           { type: array, items: { type: string } }
+ *               experience_level: { type: string, enum: [any, beginner, intermediate, expert] }
+ *     responses:
+ *       201:
+ *         description: Job created
+ */
+exports.createJob = async (req, res) => {
+  try {
+    const { title, description, category, job_type, budget_min, budget_max, deadline, skills, experience_level } = req.body;
+    if (!title || !title.trim()) return res.status(400).json({ success: false, message: 'Title is required' });
+
+    const skillsArr = Array.isArray(skills)
+      ? skills
+      : typeof skills === 'string' && skills.trim()
+        ? skills.split(',').map(s => s.trim()).filter(Boolean)
+        : [];
+
+    const job = await Job.create({
+      buyer_id: req.user.id,
+      title: title.trim(),
+      description: description || null,
+      category: category || 'General',
+      job_type: job_type || 'fixed',
+      budget_min: budget_min || null,
+      budget_max: budget_max || null,
+      deadline: deadline || null,
+      skills: skillsArr,
+      experience_level: experience_level || 'any',
+      status: 'OPEN',
+    });
+
+    return res.status(201).json({ success: true, message: 'Job posted successfully', data: job });
+  } catch (err) {
+    console.error('createJob:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ── Update job ────────────────────────────────────────────────────────
+/**
+ * @swagger
+ * /api/v1/buyer/jobs/{id}:
+ *   put:
+ *     summary: Update an open job
+ *     tags: [Buyer - Jobs]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               title:            { type: string }
+ *               description:      { type: string }
+ *               category:         { type: string }
+ *               job_type:         { type: string }
+ *               budget_min:       { type: number }
+ *               budget_max:       { type: number }
+ *               deadline:         { type: string }
+ *               skills:           { type: array }
+ *               experience_level: { type: string }
+ *     responses:
+ *       200:
+ *         description: Job updated
+ */
+exports.updateJob = async (req, res) => {
+  try {
+    const job = await Job.findOne({ where: { id: req.params.id, buyer_id: req.user.id } });
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+    if (job.status !== 'OPEN') return res.status(400).json({ success: false, message: 'Only OPEN jobs can be edited' });
+
+    const { title, description, category, job_type, budget_min, budget_max, deadline, skills, experience_level } = req.body;
+
+    const skillsArr = Array.isArray(skills)
+      ? skills
+      : typeof skills === 'string' && skills.trim()
+        ? skills.split(',').map(s => s.trim()).filter(Boolean)
+        : job.skills;
+
+    await job.update({
+      title:            title            ?? job.title,
+      description:      description      ?? job.description,
+      category:         category         ?? job.category,
+      job_type:         job_type         ?? job.job_type,
+      budget_min:       budget_min       ?? job.budget_min,
+      budget_max:       budget_max       ?? job.budget_max,
+      deadline:         deadline         ?? job.deadline,
+      skills:           skillsArr,
+      experience_level: experience_level ?? job.experience_level,
+    });
+
+    return res.json({ success: true, message: 'Job updated', data: job });
+  } catch (err) {
+    console.error('updateJob:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ── Close job ─────────────────────────────────────────────────────────
+/**
+ * @swagger
+ * /api/v1/buyer/jobs/{id}/close:
+ *   patch:
+ *     summary: Close a job
+ *     tags: [Buyer - Jobs]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Job closed
+ */
+exports.closeJob = async (req, res) => {
+  try {
+    const job = await Job.findOne({ where: { id: req.params.id, buyer_id: req.user.id } });
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+    await job.update({ status: 'CLOSED' });
+    return res.json({ success: true, message: 'Job closed', data: job });
+  } catch (err) {
+    console.error('closeJob:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ── Delete job ────────────────────────────────────────────────────────
+/**
+ * @swagger
+ * /api/v1/buyer/jobs/{id}:
+ *   delete:
+ *     summary: Delete a job (soft delete)
+ *     tags: [Buyer - Jobs]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Job deleted
+ */
+exports.deleteJob = async (req, res) => {
+  try {
+    const job = await Job.findOne({ where: { id: req.params.id, buyer_id: req.user.id } });
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+    await job.destroy();
+    return res.json({ success: true, message: 'Job deleted' });
+  } catch (err) {
+    console.error('deleteJob:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
