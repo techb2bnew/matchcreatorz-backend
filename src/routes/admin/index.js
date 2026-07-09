@@ -1,0 +1,59 @@
+'use strict';
+const router = require('express').Router();
+const { authenticate, authorize } = require('../../middlewares/auth.middleware');
+
+const {
+  listSellers, getSellerById, addSeller, editSeller,
+  approveSeller, rejectSeller, blockSeller, unblockSeller,
+} = require('../../controllers/admin/seller.controller');
+
+const {
+  listBuyers, getBuyerById, addBuyer, editBuyer,
+  blockBuyer, unblockBuyer,
+} = require('../../controllers/admin/buyer.controller');
+
+const {
+  listCategories, getCategoryById, addCategory, editCategory, deleteCategory,
+} = require('../../controllers/admin/category.controller');
+
+const {
+  listServices, getServiceById, rejectService, restoreService, toggleFeatured, deleteService: deleteAdminService,
+} = require('../../controllers/admin/service.controller');
+
+// All admin routes require authentication + ADMIN role
+router.use(authenticate, authorize('ADMIN'));
+
+// ── Sellers ──────────────────────────────────────────────────────────
+router.get   ('/sellers',              listSellers);
+router.post  ('/sellers',              addSeller);
+router.get   ('/sellers/:id',          getSellerById);
+router.put   ('/sellers/:id',          editSeller);
+router.patch ('/sellers/:id/approve',  approveSeller);
+router.patch ('/sellers/:id/reject',   rejectSeller);
+router.patch ('/sellers/:id/block',    blockSeller);
+router.patch ('/sellers/:id/unblock',  unblockSeller);
+
+// ── Buyers ───────────────────────────────────────────────────────────
+router.get   ('/buyers',               listBuyers);
+router.post  ('/buyers',               addBuyer);
+router.get   ('/buyers/:id',           getBuyerById);
+router.put   ('/buyers/:id',           editBuyer);
+router.patch ('/buyers/:id/block',     blockBuyer);
+router.patch ('/buyers/:id/unblock',   unblockBuyer);
+
+// ── Categories ────────────────────────────────────────────────────────
+router.get   ('/categories',           listCategories);
+router.post  ('/categories',           addCategory);
+router.get   ('/categories/:id',       getCategoryById);
+router.put   ('/categories/:id',       editCategory);
+router.delete('/categories/:id',       deleteCategory);
+
+// ── Services ──────────────────────────────────────────────────────────
+router.get   ('/services',             listServices);
+router.get   ('/services/:id',         getServiceById);
+router.patch ('/services/:id/reject',  rejectService);
+router.patch ('/services/:id/restore', restoreService);
+router.patch ('/services/:id/feature', toggleFeatured);
+router.delete('/services/:id',         deleteAdminService);
+
+module.exports = router;
