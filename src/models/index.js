@@ -6,6 +6,9 @@ const BuyerProfile  = require('./buyerProfile.model');
 const Category      = require('./category.model');
 const Service       = require('./service.model');
 const Job           = require('./job.model');
+const Bid           = require('./bid.model');
+const Booking       = require('./booking.model');
+const Review        = require('./review.model');
 
 // ── Associations ──────────────────────────────────────────
 
@@ -29,6 +32,40 @@ Service.belongsTo(Category, { foreignKey: 'category_id', as: 'category' });
 User.hasMany(Job, { foreignKey: 'buyer_id', as: 'jobs' });
 Job.belongsTo(User, { foreignKey: 'buyer_id', as: 'buyer' });
 
+// Job ↔ Bids (1:many)
+Job.hasMany(Bid, { foreignKey: 'job_id', as: 'bids' });
+Bid.belongsTo(Job, { foreignKey: 'job_id', as: 'job' });
+
+// User(Seller) ↔ Bids (1:many)
+User.hasMany(Bid, { foreignKey: 'seller_id', as: 'bids' });
+Bid.belongsTo(User, { foreignKey: 'seller_id', as: 'seller' });
+
+// Booking associations
+User.hasMany(Booking, { foreignKey: 'buyer_id',  as: 'buyerBookings'  });
+Booking.belongsTo(User, { foreignKey: 'buyer_id',  as: 'buyer'  });
+
+User.hasMany(Booking, { foreignKey: 'seller_id', as: 'sellerBookings' });
+Booking.belongsTo(User, { foreignKey: 'seller_id', as: 'seller' });
+
+Service.hasMany(Booking, { foreignKey: 'service_id', as: 'bookings' });
+Booking.belongsTo(Service, { foreignKey: 'service_id', as: 'service' });
+
+Job.hasMany(Booking, { foreignKey: 'job_id', as: 'bookings' });
+Booking.belongsTo(Job, { foreignKey: 'job_id', as: 'job' });
+
+// Review associations
+User.hasMany(Review, { foreignKey: 'buyer_id',  as: 'givenReviews'    });
+Review.belongsTo(User, { foreignKey: 'buyer_id',  as: 'buyer'  });
+
+User.hasMany(Review, { foreignKey: 'seller_id', as: 'receivedReviews' });
+Review.belongsTo(User, { foreignKey: 'seller_id', as: 'seller' });
+
+Service.hasMany(Review, { foreignKey: 'service_id', as: 'reviews' });
+Review.belongsTo(Service, { foreignKey: 'service_id', as: 'service' });
+
+Booking.hasOne(Review, { foreignKey: 'booking_id', as: 'review' });
+Review.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
+
 // ─────────────────────────────────────────────────────────
 
 const db = {
@@ -39,6 +76,9 @@ const db = {
   Category,
   Service,
   Job,
+  Bid,
+  Booking,
+  Review,
 };
 
 module.exports = db;

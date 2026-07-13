@@ -7,6 +7,9 @@ const { listBuyers, getBuyerById, addBuyer, editBuyer, blockBuyer, unblockBuyer 
 const { listCategories, getCategoryById, addCategory, editCategory, deleteCategory } = require('../../controllers/admin/category.controller');
 const { listServices, getServiceById, rejectService, restoreService, toggleFeatured, deleteService: deleteAdminService } = require('../../controllers/admin/service.controller');
 const { getProfile, updateProfile, changePassword } = require('../../controllers/shared/profile.controller');
+const { listBookings: listAdminBookings, getBooking: getAdminBooking, resolveDispute, deleteBooking } = require('../../controllers/admin/booking.controller');
+const { listReviews: listAdminReviews, publishReview, hideReview, deleteReview } = require('../../controllers/admin/review.controller');
+const { getStats: getAdminStats } = require('../../controllers/admin/stats.controller');
 
 router.use(authenticate, authorize('ADMIN'));
 
@@ -40,6 +43,12 @@ router.get   ('/categories/:id',       getCategoryById);
 router.put   ('/categories/:id',       editCategory);
 router.delete('/categories/:id',       deleteCategory);
 
+// ── Bookings ───────────────────────────────────────────────────────────
+router.get   ('/bookings',                  listAdminBookings);
+router.get   ('/bookings/:id',              getAdminBooking);
+router.patch ('/bookings/:id/resolve',      resolveDispute);
+router.delete('/bookings/:id',              deleteBooking);
+
 // ── Services ───────────────────────────────────────────────────────────
 router.get   ('/services',             listServices);
 router.get   ('/services/:id',         getServiceById);
@@ -47,5 +56,14 @@ router.patch ('/services/:id/reject',  rejectService);
 router.patch ('/services/:id/restore', restoreService);
 router.patch ('/services/:id/feature', toggleFeatured);
 router.delete('/services/:id',         deleteAdminService);
+
+// ── Stats ──────────────────────────────────────────────────────────────
+router.get('/stats', getAdminStats);
+
+// ── Reviews ────────────────────────────────────────────────────────────
+router.get   ('/reviews',              listAdminReviews);
+router.patch ('/reviews/:id/publish',  publishReview);
+router.patch ('/reviews/:id/hide',     hideReview);
+router.delete('/reviews/:id',          deleteReview);
 
 module.exports = router;

@@ -28,6 +28,7 @@ const options = {
     './src/controllers/*.js',
     './src/controllers/**/*.js',
     './src/routes/*.js',
+    './src/routes/**/*.js',
   ],
 };
 

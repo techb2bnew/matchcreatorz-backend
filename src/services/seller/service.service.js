@@ -1,5 +1,5 @@
 'use strict';
-const { Op }              = require('sequelize');
+const { Op, literal }     = require('sequelize');
 const { Service, Category, User, SellerProfile } = require('../../models/index');
 
 // ── List seller's own services ────────────────────────────────────────
@@ -7,7 +7,14 @@ const listMyServices = async (sellerId, { page = 1, limit = 10, search, status }
   const offset = (page - 1) * limit;
   const where  = { seller_id: sellerId };
 
-  if (search) where.title = { [Op.iLike]: `%${search}%` };
+  if (search) {
+    const safe = search.replace(/'/g, "''");
+    where[Op.or] = [
+      { title:       { [Op.iLike]: `%${search}%` } },
+      { description: { [Op.iLike]: `%${search}%` } },
+      literal(`EXISTS (SELECT 1 FROM jsonb_array_elements_text("Service"."tags") t WHERE t ILIKE '%${safe}%')`),
+    ];
+  }
   if (status) where.status = status;
 
   const { rows, count } = await Service.findAndCountAll({

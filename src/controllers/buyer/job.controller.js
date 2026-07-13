@@ -1,6 +1,8 @@
 'use strict';
-const { Job, User } = require('../../models');
-const { Op }        = require('sequelize');
+const { Job, User, Bid, Booking } = require('../../models');
+const { Op }                      = require('sequelize');
+
+const FEE_PERCENT = 0.10;
 
 const BUYER_ATTRS = ['id', 'name', 'email'];
 
@@ -14,8 +16,13 @@ const BUYER_ATTRS = ['id', 'name', 'email'];
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *         description: Case-insensitive search by job title or description (uses iLike)
+ *       - in: query
  *         name: status
  *         schema: { type: string, enum: [OPEN, IN_PROGRESS, CLOSED, CANCELLED] }
+ *         description: Filter by job status
  *       - in: query
  *         name: page
  *         schema: { type: integer, default: 1 }
@@ -28,9 +35,15 @@ const BUYER_ATTRS = ['id', 'name', 'email'];
  */
 exports.listMyJobs = async (req, res) => {
   try {
-    const { status, page = 1, limit = 20 } = req.query;
+    const { status, search, page = 1, limit = 20 } = req.query;
     const where = { buyer_id: req.user.id };
     if (status) where.status = status;
+    if (search && search.trim()) {
+      where[Op.or] = [
+        { title:       { [Op.iLike]: `%${search.trim()}%` } },
+        { description: { [Op.iLike]: `%${search.trim()}%` } },
+      ];
+    }
 
     const offset = (Number(page) - 1) * Number(limit);
     const { count, rows } = await Job.findAndCountAll({
@@ -261,6 +274,176 @@ exports.deleteJob = async (req, res) => {
     return res.json({ success: true, message: 'Job deleted' });
   } catch (err) {
     console.error('deleteJob:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// -- List bids on buyer's job ---------------------------------------------
+/**
+ * @swagger
+ * /api/v1/buyer/jobs/{id}/bids:
+ *   get:
+ *     summary: List all bids on a buyer's job
+ *     tags: [Buyer - Jobs]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *         description: Job ID
+ *     responses:
+ *       200:
+ *         description: List of bids with seller details
+ *       404:
+ *         description: Job not found
+ */
+exports.getJobBids = async (req, res) => {
+  try {
+    const job = await Job.findOne({ where: { id: req.params.id, buyer_id: req.user.id } });
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+
+    const bids = await Bid.findAll({
+      where: { job_id: job.id },
+      include: [
+        { model: User, as: 'seller', attributes: ['id', 'name', 'email'] },
+      ],
+      order: [['created_at', 'ASC']],
+    });
+
+    return res.json({ success: true, data: bids, job: job });
+  } catch (err) {
+    console.error('getJobBids:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// -- Accept a bid + auto-create booking -----------------------------------
+/**
+ * @swagger
+ * /api/v1/buyer/jobs/{id}/bids/{bidId}/accept:
+ *   patch:
+ *     summary: Accept a bid on a job (creates a booking automatically)
+ *     tags: [Buyer - Jobs]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *         description: Job ID
+ *       - in: path
+ *         name: bidId
+ *         required: true
+ *         schema: { type: integer }
+ *         description: Bid ID to accept
+ *     responses:
+ *       200:
+ *         description: Bid accepted and booking created
+ *       400:
+ *         description: Already accepted a bid for this job
+ *       404:
+ *         description: Bid or job not found
+ */
+exports.acceptBid = async (req, res) => {
+  try {
+    const job = await Job.findOne({ where: { id: req.params.id, buyer_id: req.user.id } });
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+    if (job.status !== 'OPEN')
+      return res.status(400).json({ success: false, message: 'Job is not open for bid acceptance' });
+
+    const bid = await Bid.findOne({ where: { id: req.params.bidId, job_id: job.id } });
+    if (!bid) return res.status(404).json({ success: false, message: 'Bid not found' });
+    if (bid.status === 'accepted')
+      return res.status(400).json({ success: false, message: 'Bid already accepted' });
+
+    // Check no other bid already accepted for this job
+    const existing = await Booking.findOne({ where: { job_id: job.id } });
+    if (existing)
+      return res.status(400).json({ success: false, message: 'A booking already exists for this job' });
+
+    const fee = Math.round(Number(bid.amount) * FEE_PERCENT * 100) / 100;
+
+    // 1. Update bid status
+    await bid.update({ status: 'accepted' });
+
+    // 2. Reject all other bids on this job
+    await Bid.update(
+      { status: 'rejected' },
+      { where: { job_id: job.id, id: { [Op.ne]: bid.id } } }
+    );
+
+    // 3. Update job status to IN_PROGRESS
+    await job.update({ status: 'IN_PROGRESS' });
+
+    // 4. Create booking
+    const booking = await Booking.create({
+      buyer_id:     req.user.id,
+      seller_id:    bid.seller_id,
+      job_id:       job.id,
+      service_id:   null,
+      title:        job.title,
+      amount:       Number(bid.amount),
+      platform_fee: fee,
+      delivery_days: bid.delivery_days,
+      status:       'pending',
+    });
+
+    return res.json({
+      success: true,
+      message: 'Bid accepted. Booking created successfully.',
+      data: { booking, bid },
+    });
+  } catch (err) {
+    console.error('acceptBid:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// -- Reject a single bid --------------------------------------------------
+/**
+ * @swagger
+ * /api/v1/buyer/jobs/{id}/bids/{bidId}/reject:
+ *   patch:
+ *     summary: Reject a specific bid on a job
+ *     tags: [Buyer - Jobs]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *         description: Job ID
+ *       - in: path
+ *         name: bidId
+ *         required: true
+ *         schema: { type: integer }
+ *         description: Bid ID to reject
+ *     responses:
+ *       200:
+ *         description: Bid rejected
+ *       400:
+ *         description: Bid already accepted or not pending
+ *       404:
+ *         description: Job or bid not found
+ */
+exports.rejectBid = async (req, res) => {
+  try {
+    const job = await Job.findOne({ where: { id: req.params.id, buyer_id: req.user.id } });
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+    if (job.status !== 'OPEN')
+      return res.status(400).json({ success: false, message: 'Job is not open' });
+
+    const bid = await Bid.findOne({ where: { id: req.params.bidId, job_id: job.id } });
+    if (!bid) return res.status(404).json({ success: false, message: 'Bid not found' });
+    if (bid.status !== 'pending')
+      return res.status(400).json({ success: false, message: `Bid is already ${bid.status}` });
+
+    await bid.update({ status: 'rejected' });
+
+    return res.json({ success: true, message: 'Bid rejected', data: bid });
+  } catch (err) {
+    console.error('rejectBid:', err);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };

@@ -6,8 +6,142 @@ const response = require('../../helpers/response.helper');
 /**
  * @swagger
  * tags:
- *   name: Profile
- *   description: Get and update logged-in user profile + change password
+ *   - name: Admin - Profile
+ *     description: Admin profile management
+ *   - name: Seller - Profile
+ *     description: Seller profile management
+ *   - name: Buyer - Profile
+ *     description: Buyer profile management
+ */
+
+/**
+ * @swagger
+ * /api/v1/admin/profile:
+ *   get:
+ *     summary: Get admin profile
+ *     tags: [Admin - Profile]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Profile fetched }
+ *   put:
+ *     summary: Update admin profile
+ *     tags: [Admin - Profile]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:     { type: string, example: "Admin User" }
+ *               phone:    { type: string, example: "9876543210" }
+ *               bio:      { type: string }
+ *               location: { type: string, example: "Delhi, India" }
+ *     responses:
+ *       200: { description: Profile updated }
+ *
+ * /api/v1/admin/change-password:
+ *   put:
+ *     summary: Change admin password
+ *     tags: [Admin - Profile]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [current_password, new_password]
+ *             properties:
+ *               current_password: { type: string, example: "OldPass@123" }
+ *               new_password:     { type: string, example: "NewPass@456" }
+ *     responses:
+ *       200: { description: Password changed }
+ *       400: { description: Incorrect current password }
+ *
+ * /api/v1/seller/profile:
+ *   get:
+ *     summary: Get seller profile
+ *     tags: [Seller - Profile]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Profile fetched }
+ *   put:
+ *     summary: Update seller profile
+ *     tags: [Seller - Profile]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:     { type: string }
+ *               phone:    { type: string }
+ *               bio:      { type: string }
+ *               location: { type: string }
+ *     responses:
+ *       200: { description: Profile updated }
+ *
+ * /api/v1/seller/change-password:
+ *   put:
+ *     summary: Change seller password
+ *     tags: [Seller - Profile]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [current_password, new_password]
+ *             properties:
+ *               current_password: { type: string, example: "OldPass@123" }
+ *               new_password:     { type: string, example: "NewPass@456" }
+ *     responses:
+ *       200: { description: Password changed }
+ *
+ * /api/v1/buyer/profile:
+ *   get:
+ *     summary: Get buyer profile
+ *     tags: [Buyer - Profile]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Profile fetched }
+ *   put:
+ *     summary: Update buyer profile
+ *     tags: [Buyer - Profile]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:     { type: string }
+ *               phone:    { type: string }
+ *               bio:      { type: string }
+ *               location: { type: string }
+ *     responses:
+ *       200: { description: Profile updated }
+ *
+ * /api/v1/buyer/change-password:
+ *   put:
+ *     summary: Change buyer password
+ *     tags: [Buyer - Profile]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [current_password, new_password]
+ *             properties:
+ *               current_password: { type: string, example: "OldPass@123" }
+ *               new_password:     { type: string, example: "NewPass@456" }
+ *     responses:
+ *       200: { description: Password changed }
  */
 
 // Safe fields to return (never expose password/OTP)
