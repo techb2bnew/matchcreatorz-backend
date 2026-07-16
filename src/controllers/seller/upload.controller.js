@@ -43,4 +43,50 @@ const uploadServiceImages = async (req, res, next) => {
   }
 };
 
-module.exports = { uploadServiceImages };
+/**
+ * @swagger
+ * /api/v1/seller/upload/resume:
+ *   post:
+ *     summary: Upload resume to S3 (PDF / DOC / DOCX, max 10 MB)
+ *     tags: [Seller - Profile]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required: [resume]
+ *             properties:
+ *               resume:
+ *                 type: string
+ *                 format: binary
+ *                 description: PDF, DOC, or DOCX file (max 10 MB)
+ *     responses:
+ *       200:
+ *         description: Resume uploaded, returns public S3 URL
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 url:
+ *                   type: string
+ *                   example: "https://matchcreatorz.s3.amazonaws.com/resumes/abc123.pdf"
+ *       400:
+ *         description: No file uploaded or invalid file type
+ */
+const uploadResume = async (req, res, next) => {
+  try {
+    const file = req.file;
+    if (!file) return response.error(res, 'No file uploaded', 400);
+
+    const url = await uploadToS3(file, 'resumes');
+    return response.success(res, 'Resume uploaded successfully', { url });
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { uploadServiceImages, uploadResume };

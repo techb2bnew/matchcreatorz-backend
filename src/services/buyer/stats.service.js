@@ -1,14 +1,21 @@
 'use strict';
 const { Op, fn, col, literal } = require('sequelize');
-const { Booking, User, Service } = require('../../models');
+const { Booking, User, Service, Job } = require('../../models');
+const cache = require('../../helpers/cache.helper');
 
 exports.getDashboardStats = async (buyerId) => {
+  const cacheKey = `buyer_stats_${buyerId}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
   const [
     activeBookings,
     completedBookings,
     totalSpent,
     recentBookings,
     monthlySpend,
+    recentJobs,
+    totalJobs,
+    openJobs,
   ] = await Promise.all([
     Booking.count({
       where: { buyer_id: buyerId, status: { [Op.in]: ['pending', 'ongoing', 'amidst_completion', 'in_dispute'] } },
@@ -43,18 +50,36 @@ exports.getDashboardStats = async (buyerId) => {
       order: [[fn('DATE_TRUNC', 'month', col('created_at')), 'ASC']],
       raw: true,
     }),
+
+    // Recent 3 jobs
+    Job.findAll({
+      where:      { buyer_id: buyerId },
+      order:      [['created_at', 'DESC']],
+      limit:      3,
+      attributes: ['id', 'title', 'status', 'bids_count', 'budget_min', 'budget_max', 'created_at'],
+      paranoid:   false,
+    }).catch(() => []),
+
+    Job.count({ where: { buyer_id: buyerId }, paranoid: false }).catch(() => 0),
+    Job.count({ where: { buyer_id: buyerId, status: 'OPEN' }, paranoid: false }).catch(() => 0),
   ]);
 
-  return {
+  const result = {
     stats: {
       activeBookings,
       completedBookings,
       totalSpent: totalSpent || 0,
+      totalJobs,
+      openJobs,
     },
     recentBookings,
+    recentJobs,
     monthlySpend: monthlySpend.map(r => ({
       month:  r.month,
       amount: parseFloat(r.amount) || 0,
     })),
   };
+
+  cache.set(cacheKey, result, 60);
+  return result;
 };

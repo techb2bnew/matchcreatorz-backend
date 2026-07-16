@@ -1,8 +1,12 @@
 'use strict';
 const { Op, fn, col, literal } = require('sequelize');
-const { Booking, User, Service, Review } = require('../../models');
+const { Booking, User, Service, Review, Bid } = require('../../models');
+const cache = require('../../helpers/cache.helper');
 
 exports.getDashboardStats = async (sellerId) => {
+  const cacheKey = `seller_stats_${sellerId}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
   const [
     activeBookings,
     completedBookings,
@@ -11,22 +15,23 @@ exports.getDashboardStats = async (sellerId) => {
     reviewStats,
     recentBookings,
     monthlyEarnings,
+    pendingBids,
   ] = await Promise.all([
     Booking.count({
       where: { seller_id: sellerId, status: { [Op.in]: ['pending', 'ongoing', 'amidst_completion'] } },
     }),
     Booking.count({ where: { seller_id: sellerId, status: 'completed' } }),
     Booking.sum('amount', { where: { seller_id: sellerId, status: 'completed' } }),
-    Service.count({ where: { seller_id: sellerId, deleted_at: null } }),
+    Service.count({ where: { seller_id: sellerId } }),
 
     Review.findOne({
       attributes: [
         [fn('AVG', col('rating')), 'avg_rating'],
         [fn('COUNT', col('id')),   'total'],
       ],
-      where: { seller_id: sellerId, status: 'published' },
+      where: { seller_id: sellerId },
       raw: true,
-    }),
+    }).catch(() => null),
 
     // Recent 5 bookings
     Booking.findAll({
@@ -55,14 +60,21 @@ exports.getDashboardStats = async (sellerId) => {
       order: [[fn('DATE_TRUNC', 'month', col('created_at')), 'ASC']],
       raw: true,
     }),
+
+    // pendingBids — paranoid:false in case deleted_at column missing
+    Bid.count({
+      where:    { seller_id: sellerId, status: 'pending' },
+      paranoid: false,
+    }).catch(() => 0),
   ]);
 
-  return {
+  const result = {
     stats: {
       activeBookings,
       completedBookings,
       totalEarnings:  totalEarnings  || 0,
       totalServices,
+      pendingBids,
       avgRating:      parseFloat(reviewStats?.avg_rating || 0).toFixed(1),
       totalReviews:   parseInt(reviewStats?.total || 0),
     },
@@ -72,4 +84,7 @@ exports.getDashboardStats = async (sellerId) => {
       amount: parseFloat(r.amount) || 0,
     })),
   };
+
+  cache.set(cacheKey, result, 60); // cache 60 seconds
+  return result;
 };

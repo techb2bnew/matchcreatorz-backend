@@ -10,6 +10,7 @@ const { getProfile, updateProfile, changePassword } = require('../../controllers
 const { listBookings: listAdminBookings, getBooking: getAdminBooking, resolveDispute, deleteBooking } = require('../../controllers/admin/booking.controller');
 const { listReviews: listAdminReviews, publishReview, hideReview, deleteReview } = require('../../controllers/admin/review.controller');
 const { getStats: getAdminStats } = require('../../controllers/admin/stats.controller');
+const { listJobs, getJob, closeJob, deleteJob } = require('../../controllers/admin/job.controller');
 
 router.use(authenticate, authorize('ADMIN'));
 
@@ -56,6 +57,12 @@ router.patch ('/services/:id/reject',  rejectService);
 router.patch ('/services/:id/restore', restoreService);
 router.patch ('/services/:id/feature', toggleFeatured);
 router.delete('/services/:id',         deleteAdminService);
+
+// ── Jobs ───────────────────────────────────────────────────────────────
+router.get   ('/jobs',              listJobs);
+router.get   ('/jobs/:id',          getJob);
+router.patch ('/jobs/:id/close',    closeJob);
+router.delete('/jobs/:id',          deleteJob);
 
 // ── Stats ──────────────────────────────────────────────────────────────
 router.get('/stats', getAdminStats);

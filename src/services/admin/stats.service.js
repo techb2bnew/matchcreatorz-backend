@@ -1,8 +1,11 @@
 'use strict';
 const { Op, fn, col, literal } = require('sequelize');
-const { User, Booking, Service, Review } = require('../../models');
+const { User, Booking, Service, Review, Job } = require('../../models');
+const cache = require('../../helpers/cache.helper');
 
 exports.getDashboardStats = async () => {
+  const cached = cache.get('admin_stats');
+  if (cached) return cached;
   const [
     totalUsers,
     totalSellers,
@@ -14,11 +17,13 @@ exports.getDashboardStats = async () => {
     pendingBookings,
     recentBookings,
     monthlyRevenue,
+    totalJobs,
+    openJobs,
   ] = await Promise.all([
-    User.count({ where: { deleted_at: null } }),
-    User.count({ where: { role: 'SELLER', deleted_at: null } }),
-    User.count({ where: { role: 'BUYER',  deleted_at: null } }),
-    Service.count({ where: { deleted_at: null } }),
+    User.count({ where: { role: { [Op.ne]: null } } }),
+    User.count({ where: { role: 'SELLER' } }),
+    User.count({ where: { role: 'BUYER'  } }),
+    Service.count(),
     Booking.count(),
     Booking.count({ where: { status: 'completed' } }),
     Booking.sum('platform_fee', { where: { status: 'completed' } }),
@@ -51,9 +56,12 @@ exports.getDashboardStats = async () => {
       order: [[fn('DATE_TRUNC', 'month', col('created_at')), 'ASC']],
       raw: true,
     }),
+
+    Job.count({ paranoid: false }).catch(() => 0),
+    Job.count({ where: { status: 'OPEN' }, paranoid: false }).catch(() => 0),
   ]);
 
-  return {
+  const result = {
     stats: {
       totalUsers,
       totalSellers,
@@ -62,6 +70,8 @@ exports.getDashboardStats = async () => {
       totalBookings,
       completedBookings,
       pendingBookings,
+      totalJobs,
+      openJobs,
       totalRevenue: totalRevenue || 0,
     },
     recentBookings,
@@ -71,4 +81,7 @@ exports.getDashboardStats = async () => {
       bookings: parseInt(r.bookings)  || 0,
     })),
   };
+
+  cache.set('admin_stats', result, 60);
+  return result;
 };

@@ -18,8 +18,21 @@ const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
 
 // ── CORS ──────────────────────────────────────────────────────
+const ALLOWED_ORIGINS = [
+  env.CLIENT_URL,
+  /\.ngrok-free\.app$/,
+  /\.ngrok-free\.dev$/,
+  /\.ngrok\.io$/,
+];
+
 app.use(cors({
-  origin:      env.CLIENT_URL,
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // allow non-browser / same-origin
+    const allowed = ALLOWED_ORIGINS.some(o =>
+      typeof o === 'string' ? o === origin : o.test(origin)
+    );
+    allowed ? cb(null, true) : cb(new Error(`CORS blocked: ${origin}`));
+  },
   credentials: true,
   methods:     ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }));
