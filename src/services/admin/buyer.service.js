@@ -1,8 +1,9 @@
 'use strict';
 const bcrypt     = require('bcryptjs');
-const { Op }     = require('sequelize');
+const { Op, literal } = require('sequelize');
 const { User, BuyerProfile } = require('../../models/index');
 const { sendAdminWelcome }   = require('../../helpers/email.helper');
+const notify                 = require('../../helpers/notification.helper');
 
 const buyerInclude = {
   model:      BuyerProfile,
@@ -11,7 +12,7 @@ const buyerInclude = {
 };
 
 // ── List buyers ───────────────────────────────────────────────────────
-const listBuyers = async ({ page = 1, limit = 10, search, status }) => {
+const listBuyers = async ({ page = 1, limit = 10, search, status, deleted }) => {
   const offset = (page - 1) * limit;
 
   const userWhere = { role: 'BUYER' };
@@ -21,16 +22,26 @@ const listBuyers = async ({ page = 1, limit = 10, search, status }) => {
     { email: { [Op.iLike]: `%${search}%` } },
   ];
 
-  const { rows, count } = await User.findAndCountAll({
+  const showDeleted = deleted === true || deleted === 'true';
+
+  const { rows } = await User.findAndCountAll({
     where:    userWhere,
-    include:  [buyerInclude],
+    include:  [{ ...buyerInclude, paranoid: false, required: false }],
     order:    [['createdAt', 'DESC']],
-    limit:    Number(limit),
-    offset,
+    paranoid: false,   // fetch ALL, filter in JS
     distinct: true,
   });
 
-  return { buyers: rows.map(formatBuyer), total: count, page: Number(page), limit: Number(limit) };
+  // JS filter — deletedAt value confirmed correct from debug log
+  const filtered = showDeleted
+    ? rows.filter(r => r.dataValues.deletedAt != null)   // deleted users only
+    : rows.filter(r => r.dataValues.deletedAt == null);  // non-deleted only
+
+  // Apply pagination after filter
+  const total     = filtered.length;
+  const paginated = filtered.slice(offset, offset + Number(limit));
+
+  return { buyers: paginated.map(formatBuyer), total, page: Number(page), limit: Number(limit) };
 };
 
 // ── Get buyer by ID ───────────────────────────────────────────────────
@@ -93,6 +104,7 @@ const blockBuyer = async (id) => {
   if (user.status === 'banned') throw { statusCode: 400, message: 'Buyer is already blocked' };
 
   await user.update({ status: 'banned' });
+  notify.buyerBlocked(user);
   return { status: 'banned' };
 };
 
@@ -103,6 +115,7 @@ const unblockBuyer = async (id) => {
   if (user.status !== 'banned') throw { statusCode: 400, message: 'Buyer is not blocked' };
 
   await user.update({ status: 'active' });
+  notify.buyerUnblocked(user);
   return { status: 'active' };
 };
 

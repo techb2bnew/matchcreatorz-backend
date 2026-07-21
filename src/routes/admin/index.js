@@ -11,6 +11,7 @@ const { listBookings: listAdminBookings, getBooking: getAdminBooking, resolveDis
 const { listReviews: listAdminReviews, publishReview, hideReview, deleteReview } = require('../../controllers/admin/review.controller');
 const { getStats: getAdminStats } = require('../../controllers/admin/stats.controller');
 const { listJobs, getJob, closeJob, deleteJob } = require('../../controllers/admin/job.controller');
+const { addConnects, sellerHistory: connectsSellerHistory } = require('../../controllers/admin/connect.controller');
 
 router.use(authenticate, authorize('ADMIN'));
 
@@ -63,6 +64,10 @@ router.get   ('/jobs',              listJobs);
 router.get   ('/jobs/:id',          getJob);
 router.patch ('/jobs/:id/close',    closeJob);
 router.delete('/jobs/:id',          deleteJob);
+
+// ── Connects ───────────────────────────────────────────────────────────
+router.post('/connects/:sellerId',         addConnects);
+router.get ('/connects/:sellerId/history', connectsSellerHistory);
 
 // ── Stats ──────────────────────────────────────────────────────────────
 router.get('/stats', getAdminStats);

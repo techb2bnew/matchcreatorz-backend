@@ -1,8 +1,41 @@
 'use strict';
-const { Op }   = require('sequelize');
+const { Op, literal } = require('sequelize');
 const { Job, User, Bid } = require('../../models');
 const response = require('../../helpers/response.helper');
 
+/**
+ * @swagger
+ * tags:
+ *   name: Admin - Jobs
+ *   description: Admin job moderation & management
+ */
+
+/**
+ * @swagger
+ * /api/v1/admin/jobs:
+ *   get:
+ *     summary: List all jobs (admin)
+ *     tags: [Admin - Jobs]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *         description: Search by title, description or category
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [OPEN, IN_PROGRESS, CLOSED, CANCELLED] }
+ *         description: Filter by job status
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 10 }
+ *     responses:
+ *       200:
+ *         description: Paginated list of jobs with buyer info
+ */
 // ── List all jobs ──────────────────────────────────────────────────────
 exports.listJobs = async (req, res, next) => {
   try {
@@ -14,10 +47,12 @@ exports.listJobs = async (req, res, next) => {
     const where = {};
     if (status) where.status = status;
     if (search) {
+      const safe = String(search).replace(/'/g, "''");
       where[Op.or] = [
         { title:       { [Op.iLike]: `%${search}%` } },
         { description: { [Op.iLike]: `%${search}%` } },
         { category:    { [Op.iLike]: `%${search}%` } },
+        literal(`CAST("Job"."skills" AS TEXT) ILIKE '%${safe}%'`),
       ];
     }
 
@@ -32,15 +67,28 @@ exports.listJobs = async (req, res, next) => {
       paranoid: false,
     });
 
-    return response.success(res, 'Jobs fetched', rows, {
-      total: count,
-      page,
-      limit,
-      pages: Math.ceil(count / limit),
-    });
+    return response.paginate(res, 'Jobs fetched', rows, { total: count, page, limit });
   } catch (err) { next(err); }
 };
 
+/**
+ * @swagger
+ * /api/v1/admin/jobs/{id}:
+ *   get:
+ *     summary: Get a single job with its bids (admin)
+ *     tags: [Admin - Jobs]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Job detail with buyer and all bids (incl. seller info)
+ *       404:
+ *         description: Job not found
+ */
 // ── Get single job with bids ───────────────────────────────────────────
 exports.getJob = async (req, res, next) => {
   try {
@@ -61,6 +109,24 @@ exports.getJob = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+/**
+ * @swagger
+ * /api/v1/admin/jobs/{id}/close:
+ *   patch:
+ *     summary: Close a job to stop new bids (admin)
+ *     tags: [Admin - Jobs]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Job closed
+ *       404:
+ *         description: Job not found
+ */
 // ── Close job ─────────────────────────────────────────────────────────
 exports.closeJob = async (req, res, next) => {
   try {
@@ -71,6 +137,24 @@ exports.closeJob = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+/**
+ * @swagger
+ * /api/v1/admin/jobs/{id}:
+ *   delete:
+ *     summary: Delete a job (admin)
+ *     tags: [Admin - Jobs]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Job deleted
+ *       404:
+ *         description: Job not found
+ */
 // ── Delete job ────────────────────────────────────────────────────────
 exports.deleteJob = async (req, res, next) => {
   try {

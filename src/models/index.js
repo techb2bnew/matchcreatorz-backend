@@ -9,6 +9,10 @@ const Job           = require('./job.model');
 const Bid           = require('./bid.model');
 const Booking       = require('./booking.model');
 const Review        = require('./review.model');
+const Notification  = require('./notification.model');
+const Favourite     = require('./favourite.model');
+const ConnectTransaction = require('./connectTransaction.model');
+const Offer         = require('./offer.model');
 
 // ── Associations ──────────────────────────────────────────
 
@@ -66,6 +70,28 @@ Review.belongsTo(Service, { foreignKey: 'service_id', as: 'service' });
 Booking.hasOne(Review, { foreignKey: 'booking_id', as: 'review' });
 Review.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
 
+// User ↔ Notifications (1:many)
+User.hasMany(Notification, { foreignKey: 'user_id', as: 'notifications' });
+Notification.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
+// Favourites (buyer ↔ service, many:many via Favourite)
+User.hasMany(Favourite, { foreignKey: 'user_id', as: 'favourites' });
+Favourite.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+Service.hasMany(Favourite, { foreignKey: 'service_id', as: 'favouritedBy' });
+Favourite.belongsTo(Service, { foreignKey: 'service_id', as: 'service' });
+
+// Connect transactions (seller ledger)
+User.hasMany(ConnectTransaction, { foreignKey: 'seller_id', as: 'connectTransactions' });
+ConnectTransaction.belongsTo(User, { foreignKey: 'seller_id', as: 'seller' });
+
+// Offers (seller → buyer)
+User.hasMany(Offer, { foreignKey: 'seller_id', as: 'sentOffers' });
+User.hasMany(Offer, { foreignKey: 'buyer_id',  as: 'receivedOffers' });
+Offer.belongsTo(User, { foreignKey: 'seller_id', as: 'seller' });
+Offer.belongsTo(User, { foreignKey: 'buyer_id',  as: 'buyer' });
+Offer.belongsTo(Service, { foreignKey: 'service_id', as: 'service' });
+Offer.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
+
 // ─────────────────────────────────────────────────────────
 
 const db = {
@@ -79,6 +105,10 @@ const db = {
   Bid,
   Booking,
   Review,
+  Notification,
+  Favourite,
+  ConnectTransaction,
+  Offer,
 };
 
 module.exports = db;

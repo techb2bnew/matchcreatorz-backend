@@ -376,6 +376,180 @@ const sendAdminWelcome = (to, name, role, tempPassword) => {
   });
 };
 
+// ── Seller account approved by admin ───────────────────────────────────
+const sendSellerApproved = (to, name) =>
+  sendMail({
+    to,
+    subject: 'Your seller account has been approved! 🎉',
+    html: baseTemplate(`
+      <h2>Account Approved! 🎉</h2>
+      <p>Hi ${name}, great news! Your MatchCreatorz seller account has been <strong style="color:#16a34a;">approved</strong> by our team.</p>
+      <p>You can now create services, receive bookings, and start earning.</p>
+      <a class="btn" href="${env.CLIENT_URL}/seller/dashboard">Go to Dashboard</a>
+      <p style="color:#6b7280;font-size:13px;">Complete your profile to attract more clients.</p>
+    `),
+  });
+
+// ── Seller account rejected by admin ───────────────────────────────────
+const sendSellerRejected = (to, name) =>
+  sendMail({
+    to,
+    subject: 'Update on your MatchCreatorz seller application',
+    html: baseTemplate(`
+      <h2>Application Status Update</h2>
+      <p>Hi ${name}, after reviewing your seller account application, our team has decided not to approve it at this time.</p>
+      <p>This could be due to incomplete profile information or not meeting our quality standards.</p>
+      <p>You can update your profile and reapply, or <a href="mailto:support@matchcreatorz.com" style="color:#e84545;">contact support</a> for more information.</p>
+      <a class="btn" href="${env.CLIENT_URL}/seller/profile">Update Profile</a>
+    `),
+  });
+
+// ── Account blocked ─────────────────────────────────────────────────────
+const sendAccountBlocked = (to, name, role) =>
+  sendMail({
+    to,
+    subject: 'Your MatchCreatorz account has been suspended',
+    html: baseTemplate(`
+      <h2>Account Suspended</h2>
+      <p>Hi ${name}, your MatchCreatorz ${role} account has been <strong style="color:#dc2626;">suspended</strong> by our admin team.</p>
+      <p>If you believe this is a mistake, please contact our support team.</p>
+      <a class="btn" href="mailto:support@matchcreatorz.com">Contact Support</a>
+    `),
+  });
+
+// ── Account unblocked ───────────────────────────────────────────────────
+const sendAccountUnblocked = (to, name, role) =>
+  sendMail({
+    to,
+    subject: 'Your MatchCreatorz account has been reinstated',
+    html: baseTemplate(`
+      <h2>Account Reinstated ✅</h2>
+      <p>Hi ${name}, your MatchCreatorz ${role} account has been <strong style="color:#16a34a;">reinstated</strong>. You can now log in and use the platform.</p>
+      <a class="btn" href="${env.CLIENT_URL}/login">Login Now</a>
+    `),
+  });
+
+// ── Bid withdrawn → buyer ───────────────────────────────────────────────
+const sendBidWithdrawn = (to, buyerName, jobTitle, sellerName) =>
+  sendMail({
+    to,
+    subject: `A bid was withdrawn — "${jobTitle}"`,
+    html: baseTemplate(`
+      <h2>Bid Withdrawn</h2>
+      <p>Hi ${buyerName}, <strong>${sellerName}</strong> has withdrawn their bid on your job <strong>"${jobTitle}"</strong>.</p>
+      <p>Don't worry — other sellers may still bid on your job.</p>
+      <a class="btn" href="${env.CLIENT_URL}/buyer/jobs">View Job</a>
+    `),
+  });
+
+// ── Bid accepted → seller ───────────────────────────────────────────────
+const sendBidAccepted = (to, sellerName, jobTitle) =>
+  sendMail({
+    to,
+    subject: `Your bid was accepted — "${jobTitle}"`,
+    html: baseTemplate(`
+      <h2>Bid Accepted! 🎉</h2>
+      <p>Hi ${sellerName}, your bid on the job <strong>"${jobTitle}"</strong> has been <strong style="color:#16a34a;">accepted</strong> by the buyer.</p>
+      <p>A booking has been automatically created. Please accept the order to start working.</p>
+      <a class="btn" href="${env.CLIENT_URL}/seller/bookings">View Booking</a>
+    `),
+  });
+
+// ── Bid rejected → seller ───────────────────────────────────────────────
+const sendBidRejected = (to, sellerName, jobTitle) =>
+  sendMail({
+    to,
+    subject: `Bid update — "${jobTitle}"`,
+    html: baseTemplate(`
+      <h2>Bid Not Selected</h2>
+      <p>Hi ${sellerName}, the buyer reviewed all bids for <strong>"${jobTitle}"</strong> and selected a different seller this time.</p>
+      <p>Don't worry — there are many other opportunities waiting for you!</p>
+      <a class="btn" href="${env.CLIENT_URL}/seller/jobs">Browse Jobs</a>
+    `),
+  });
+
+// ── Booking received → seller ───────────────────────────────────────────
+const sendBookingReceived = (to, sellerName, bookingTitle) =>
+  sendMail({
+    to,
+    subject: `New booking request — "${bookingTitle}"`,
+    html: baseTemplate(`
+      <h2>New Booking Request 📥</h2>
+      <p>Hi ${sellerName}, you have received a new booking request for <strong>"${bookingTitle}"</strong>.</p>
+      <p>Please review and accept or decline the booking within 24 hours.</p>
+      <a class="btn" href="${env.CLIENT_URL}/seller/bookings">View Booking</a>
+    `),
+  });
+
+// ── Work submitted → buyer ──────────────────────────────────────────────
+const sendWorkSubmitted = (to, buyerName, bookingTitle) =>
+  sendMail({
+    to,
+    subject: `Work submitted for review — "${bookingTitle}"`,
+    html: baseTemplate(`
+      <h2>Work Ready for Review 📋</h2>
+      <p>Hi ${buyerName}, the seller has submitted work for your booking <strong>"${bookingTitle}"</strong>.</p>
+      <p>Please review the deliverables and either <strong>accept</strong> the work or <strong>raise a dispute</strong> if revisions are needed.</p>
+      <a class="btn" href="${env.CLIENT_URL}/buyer/bookings">Review Work</a>
+      <p style="color:#6b7280;font-size:13px;">You have 5 days to review. After that, the work will be auto-accepted.</p>
+    `),
+  });
+
+// ── Work accepted → seller ──────────────────────────────────────────────
+const sendWorkAccepted = (to, sellerName, bookingTitle) =>
+  sendMail({
+    to,
+    subject: `Work accepted — "${bookingTitle}" is complete!`,
+    html: baseTemplate(`
+      <h2>Work Accepted! ✅</h2>
+      <p>Hi ${sellerName}, the buyer has accepted your work for <strong>"${bookingTitle}"</strong>.</p>
+      <p>The booking is now marked as <strong style="color:#16a34a;">completed</strong>. Great work!</p>
+      <a class="btn" href="${env.CLIENT_URL}/seller/bookings">View Bookings</a>
+    `),
+  });
+
+// ── Dispute raised → seller ─────────────────────────────────────────────
+const sendDisputeRaised = (to, sellerName, bookingTitle) =>
+  sendMail({
+    to,
+    subject: `Dispute raised on "${bookingTitle}"`,
+    html: baseTemplate(`
+      <h2>Dispute Raised ⚠️</h2>
+      <p>Hi ${sellerName}, the buyer has raised a dispute on the booking <strong>"${bookingTitle}"</strong>.</p>
+      <p>Our support team will review the case and reach out to both parties. Please be patient.</p>
+      <a class="btn" href="${env.CLIENT_URL}/seller/bookings">View Booking</a>
+      <p style="color:#6b7280;font-size:13px;">If you have questions, <a href="mailto:support@matchcreatorz.com" style="color:#e84545;">contact support</a>.</p>
+    `),
+  });
+
+// ── Booking cancelled ───────────────────────────────────────────────────
+const sendBookingCancelled = (to, name, bookingTitle, cancelledBy) =>
+  sendMail({
+    to,
+    subject: `Booking cancelled — "${bookingTitle}"`,
+    html: baseTemplate(`
+      <h2>Booking Cancelled</h2>
+      <p>Hi ${name}, the booking <strong>"${bookingTitle}"</strong> has been cancelled by the <strong>${cancelledBy}</strong>.</p>
+      <p>If you have any questions, please <a href="mailto:support@matchcreatorz.com" style="color:#e84545;">contact support</a>.</p>
+      <a class="btn" href="${env.CLIENT_URL}/${cancelledBy === 'buyer' ? 'seller' : 'buyer'}/bookings">View Bookings</a>
+    `),
+  });
+
+// ── Review received → seller ────────────────────────────────────────────
+const sendReviewReceived = (to, sellerName, buyerName, rating, serviceName) => {
+  const stars = '⭐'.repeat(Number(rating));
+  return sendMail({
+    to,
+    subject: `New ${rating}-star review received`,
+    html: baseTemplate(`
+      <h2>New Review! ${stars}</h2>
+      <p>Hi ${sellerName}, <strong>${buyerName}</strong> left you a <strong>${rating}-star</strong> review${serviceName ? ` for <strong>"${serviceName}"</strong>` : ''}.</p>
+      <div style="text-align:center;font-size:36px;padding:16px 0;">${stars}</div>
+      <a class="btn" href="${env.CLIENT_URL}/seller/reviews">View All Reviews</a>
+    `),
+  });
+};
+
 module.exports = {
   sendWelcome,
   sendOtp,
@@ -385,4 +559,18 @@ module.exports = {
   sendBookingConfirmed,
   sendConnectsAdded,
   sendAdminWelcome,
+  // new
+  sendSellerApproved,
+  sendSellerRejected,
+  sendAccountBlocked,
+  sendAccountUnblocked,
+  sendBidWithdrawn,
+  sendBidAccepted,
+  sendBidRejected,
+  sendBookingReceived,
+  sendWorkSubmitted,
+  sendWorkAccepted,
+  sendDisputeRaised,
+  sendBookingCancelled,
+  sendReviewReceived,
 };

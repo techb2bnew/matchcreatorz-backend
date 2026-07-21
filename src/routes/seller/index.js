@@ -6,11 +6,15 @@ const multer = require('multer');
 const { listMyServices, getMyService, createService, updateService, deleteService, publishService, pauseService } = require('../../controllers/seller/service.controller');
 const { uploadResume } = require('../../controllers/seller/upload.controller');
 const { getSellerProfile, updateSellerProfile } = require('../../controllers/seller/profile.controller');
-const { changePassword } = require('../../controllers/shared/profile.controller');
+const { changePassword, deleteAccount } = require('../../controllers/shared/profile.controller');
+const { registerFcmToken, clearFcmToken } = require('../../controllers/shared/fcm.controller');
+const { listNotifications, getUnreadCount, markOneRead, markAllRead, deleteOne: deleteNotification } = require('../../controllers/shared/notification.controller');
 const { browseJobs, getJobDetail, placeBid, updateBid, withdrawBid, myBids } = require('../../controllers/seller/job.controller');
 const { listBookings: listSellerBookings, getBooking: getSellerBooking, acceptOrder, submitWork, cancelBooking: cancelSellerBooking } = require('../../controllers/seller/booking.controller');
 const { listReviews: listSellerReviews } = require('../../controllers/seller/review.controller');
 const { getStats: getSellerStats }       = require('../../controllers/seller/stats.controller');
+const { getBalance: getConnectsBalance, getHistory: getConnectsHistory } = require('../../controllers/seller/connect.controller');
+const { sendOffer, listSentOffers, withdrawOffer } = require('../../controllers/shared/offer.controller');
 
 const imageUpload = multer({
   storage: multer.memoryStorage(),
@@ -33,10 +37,20 @@ const resumeUpload = multer({
 router.use(authenticate, authorize('SELLER'));
 
 // ── Profile ────────────────────────────────────────────────────────────
-router.get ('/profile',                   getSellerProfile);
-router.put ('/profile',                   updateSellerProfile);
-router.put ('/change-password',           changePassword);
-router.post('/upload/resume',             resumeUpload.single('resume'), uploadResume);
+router.get   ('/profile',         getSellerProfile);
+router.put   ('/profile',         updateSellerProfile);
+router.put   ('/change-password', changePassword);
+router.delete('/account',         deleteAccount);
+router.put   ('/fcm-token',       registerFcmToken);
+router.delete('/fcm-token',       clearFcmToken);
+
+// ── Notifications ──────────────────────────────────────────────────────
+router.get   ('/notifications',              listNotifications);
+router.get   ('/notifications/unread-count', getUnreadCount);
+router.put   ('/notifications/read-all',     markAllRead);
+router.put   ('/notifications/:id/read',     markOneRead);
+router.delete('/notifications/:id',          deleteNotification);
+router.post  ('/upload/resume',   resumeUpload.single('resume'), uploadResume);
 
 // ── Services ───────────────────────────────────────────────────────────
 router.get   ('/services',              listMyServices);
@@ -67,5 +81,14 @@ router.get('/stats', getSellerStats);
 
 // ── Reviews ────────────────────────────────────────────────────────────
 router.get('/reviews', listSellerReviews);
+
+// ── Connects ───────────────────────────────────────────────────────────
+router.get('/connects/balance', getConnectsBalance);
+router.get('/connects/history', getConnectsHistory);
+
+// ── Offers (sent) ──────────────────────────────────────────────────────
+router.get   ('/offers',     listSentOffers);
+router.post  ('/offers',     sendOffer);
+router.delete('/offers/:id', withdrawOffer);
 
 module.exports = router;

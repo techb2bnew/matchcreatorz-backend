@@ -1,6 +1,7 @@
 'use strict';
 const { Review, User, Service, Booking } = require('../../models');
 const { Op, fn, col } = require('sequelize');
+const { recalcSellerRating } = require('../buyer/review.service');
 
 const listAllReviews = async ({ search, status, page = 1, limit = 20 }) => {
   const where = {};
@@ -36,6 +37,7 @@ const publishReview = async (id) => {
   if (!r) throw { statusCode: 404, message: 'Review not found' };
   await r.update({ status: 'published' });
   if (r.service_id) await recalcServiceRating(r.service_id);
+  await recalcSellerRating(r.seller_id);
   return r;
 };
 
@@ -44,6 +46,7 @@ const hideReview = async (id) => {
   if (!r) throw { statusCode: 404, message: 'Review not found' };
   await r.update({ status: 'hidden' });
   if (r.service_id) await recalcServiceRating(r.service_id);
+  await recalcSellerRating(r.seller_id);
   return r;
 };
 
@@ -51,8 +54,10 @@ const deleteReview = async (id) => {
   const r = await Review.findByPk(id);
   if (!r) throw { statusCode: 404, message: 'Review not found' };
   const sid = r.service_id;
+  const sellerId = r.seller_id;
   await r.destroy();
   if (sid) await recalcServiceRating(sid);
+  await recalcSellerRating(sellerId);
 };
 
 async function recalcServiceRating(serviceId) {

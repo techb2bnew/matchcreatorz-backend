@@ -1,8 +1,9 @@
 'use strict';
 const bcrypt      = require('bcryptjs');
-const { Op }      = require('sequelize');
+const { Op, literal } = require('sequelize');
 const { User, SellerProfile } = require('../../models/index');
 const { sendAdminWelcome }    = require('../../helpers/email.helper');
+const notify                  = require('../../helpers/notification.helper');
 
 const sellerInclude = {
   model:      SellerProfile,
@@ -13,7 +14,7 @@ const sellerInclude = {
 };
 
 // ── List sellers ─────────────────────────────────────────────────────
-const listSellers = async ({ page = 1, limit = 10, search, approval_status, status }) => {
+const listSellers = async ({ page = 1, limit = 10, search, approval_status, status, deleted }) => {
   const offset = (page - 1) * limit;
 
   const userWhere = { role: 'SELLER' };
@@ -23,27 +24,38 @@ const listSellers = async ({ page = 1, limit = 10, search, approval_status, stat
     { email: { [Op.iLike]: `%${search}%` } },
   ];
 
+  const showDeleted = deleted === true || deleted === 'true';
+
   const profileWhere = {};
   if (approval_status) profileWhere.approval_status = approval_status;
 
-  const { rows, count } = await User.findAndCountAll({
+  const { rows } = await User.findAndCountAll({
     where:   userWhere,
     include: [{
       ...sellerInclude,
       where:    Object.keys(profileWhere).length ? profileWhere : undefined,
-      required: !!Object.keys(profileWhere).length,
+      required: false,
+      paranoid: false,
     }],
-    order:  [['createdAt', 'DESC']],
-    limit:  Number(limit),
-    offset,
+    order:    [['createdAt', 'DESC']],
+    paranoid: false,   // fetch ALL (deleted + non-deleted), filter in JS
     distinct: true,
   });
 
+  // JS filter — deletedAt value confirmed correct from debug log
+  const filtered = showDeleted
+    ? rows.filter(r => r.dataValues.deletedAt != null)   // deleted users only
+    : rows.filter(r => r.dataValues.deletedAt == null);  // non-deleted only
+
+  // Apply pagination after filter
+  const total    = filtered.length;
+  const paginated = filtered.slice(offset, offset + Number(limit));
+
   return {
-    sellers: rows.map(formatSeller),
-    total: count,
-    page:  Number(page),
-    limit: Number(limit),
+    sellers: paginated.map(formatSeller),
+    total,
+    page:    Number(page),
+    limit:   Number(limit),
   };
 };
 
@@ -114,6 +126,7 @@ const approveSeller = async (id) => {
 
   await user.sellerProfile.update({ approval_status: 'approved' });
   await user.update({ status: 'active' });
+  notify.sellerApproved(user);
   return { approval_status: 'approved' };
 };
 
@@ -125,6 +138,7 @@ const rejectSeller = async (id) => {
 
   await user.sellerProfile.update({ approval_status: 'rejected' });
   await user.update({ status: 'inactive' });   // block login on rejection
+  notify.sellerRejected(user);
   return { approval_status: 'rejected' };
 };
 
@@ -135,6 +149,7 @@ const blockSeller = async (id) => {
   if (user.status === 'banned') throw { statusCode: 400, message: 'Seller is already blocked' };
 
   await user.update({ status: 'banned' });
+  notify.sellerBlocked(user);
   return { status: 'banned' };
 };
 
@@ -145,6 +160,7 @@ const unblockSeller = async (id) => {
   if (user.status !== 'banned') throw { statusCode: 400, message: 'Seller is not blocked' };
 
   await user.update({ status: 'active' });
+  notify.sellerUnblocked(user);
   return { status: 'active' };
 };
 

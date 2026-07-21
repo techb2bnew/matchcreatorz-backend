@@ -1,6 +1,7 @@
 'use strict';
-const { Op }                             = require('sequelize');
+const { Op, literal }                    = require('sequelize');
 const { Service, User, Category }        = require('../../models');
+const response                           = require('../../helpers/response.helper');
 
 /**
  * @swagger
@@ -62,9 +63,13 @@ exports.searchServices = async (req, res) => {
     const where = { status: 'active' };
 
     if (search && search.trim()) {
+      const term = search.trim();
+      const safe = term.replace(/'/g, "''");   // escape single quotes for the raw literal
       where[Op.or] = [
-        { title:       { [Op.iLike]: `%${search.trim()}%` } },
-        { description: { [Op.iLike]: `%${search.trim()}%` } },
+        { title:       { [Op.iLike]: `%${term}%` } },
+        { description: { [Op.iLike]: `%${term}%` } },
+        // searchable tags (tags stored as JSONB array of strings)
+        literal(`EXISTS (SELECT 1 FROM jsonb_array_elements_text("Service"."tags") t WHERE t ILIKE '%${safe}%')`),
       ];
     }
 
@@ -112,18 +117,13 @@ exports.searchServices = async (req, res) => {
       distinct: true,
     });
 
-    return res.json({
-      success: true,
-      data: rows,
-      pagination: {
-        total: count,
-        page:  Number(page),
-        limit: Number(limit),
-        pages: Math.ceil(count / Number(limit)),
-      },
+    return response.paginate(res, 'Services fetched', rows, {
+      total: count,
+      page:  Number(page),
+      limit: Number(limit),
     });
   } catch (err) {
     console.error('searchServices:', err);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return response.serverError(res, 'Server error');
   }
 };

@@ -29,17 +29,23 @@ const created = (res, message = 'Created successfully', data = null) => {
  * @param {object} meta  { page, limit, total }
  */
 const paginate = (res, message = 'Fetched successfully', data = [], meta = {}) => {
-  const { page = 1, limit = 10, total = 0 } = meta;
+  const { page = 1, limit = 10, total = 0, ...extra } = meta;
+  const totalPages = Math.ceil(Number(total) / Number(limit || 1));
+  const block = {
+    page:       Number(page),
+    limit:      Number(limit),
+    total:      Number(total),
+    totalPages,
+    pages:      totalPages, // alias for clients expecting `pages`
+  };
   return res.status(200).json({
     success:    true,
     message,
     data,
-    meta: {
-      page:       Number(page),
-      limit:      Number(limit),
-      total:      Number(total),
-      totalPages: Math.ceil(total / limit),
-    },
+    // both keys emitted so every client shape works uniformly
+    meta:        block,
+    pagination:  block,
+    ...extra,     // optional extras like `summary`, `stats`
   });
 };
 

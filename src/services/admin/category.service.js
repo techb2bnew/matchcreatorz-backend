@@ -1,6 +1,6 @@
 'use strict';
-const { Op }     = require('sequelize');
-const { Category } = require('../../models/index');
+const { Op }                 = require('sequelize');
+const { Category, Service }  = require('../../models/index');
 
 // ── List categories ───────────────────────────────────────────────────
 const listCategories = async ({ page = 1, limit = 20, search }) => {
@@ -61,6 +61,12 @@ const editCategory = async (id, { name, icon, description }) => {
 const deleteCategory = async (id) => {
   const cat = await Category.findByPk(id);
   if (!cat) throw { statusCode: 404, message: 'Category not found' };
+
+  // Guard: don't delete a category that still has services linked to it
+  const linked = await Service.count({ where: { category_id: id } });
+  if (linked > 0)
+    throw { statusCode: 400, message: `Cannot delete: ${linked} service(s) still use this category` };
+
   await cat.destroy();
   return { deleted: true };
 };

@@ -207,12 +207,14 @@ const updateProfile = async (req, res, next) => {
     const user = await User.findByPk(req.user.id);
     if (!user) return response.notFound(res, 'User not found');
 
-    // Only update fields that were actually sent
-    if (name     !== undefined) user.name     = name.trim();
-    if (phone    !== undefined) user.phone    = phone.trim();
-    if (bio      !== undefined) user.bio      = bio.trim();
-    if (location !== undefined) user.location = location.trim();
-    if (avatar   !== undefined) user.avatar   = avatar.trim();
+    // Only update fields that were actually sent. Null-safe: coerce to string
+    // before trimming so a null/number payload can never throw.
+    const clean = (v) => (v === null || v === undefined ? v : String(v).trim());
+    if (name     !== undefined) user.name     = clean(name);
+    if (phone    !== undefined) user.phone    = clean(phone);
+    if (bio      !== undefined) user.bio      = clean(bio);
+    if (location !== undefined) user.location = clean(location);
+    if (avatar   !== undefined) user.avatar   = clean(avatar);
 
     await user.save();
 
@@ -272,4 +274,84 @@ const changePassword = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getProfile, updateProfile, changePassword };
+/**
+ * @swagger
+ * /api/v1/buyer/account:
+ *   delete:
+ *     summary: Delete buyer account (soft delete)
+ *     tags: [Buyer - Profile]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               reason:
+ *                 type: string
+ *                 example: "No longer needed"
+ *                 description: Optional reason for deletion
+ *     responses:
+ *       200:
+ *         description: Account deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 message: { type: string, example: "Account deleted successfully" }
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: User not found
+ *
+ * /api/v1/seller/account:
+ *   delete:
+ *     summary: Delete seller account (soft delete)
+ *     tags: [Seller - Profile]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               reason:
+ *                 type: string
+ *                 example: "Switching to another platform"
+ *                 description: Optional reason for deletion
+ *     responses:
+ *       200:
+ *         description: Account deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 message: { type: string, example: "Account deleted successfully" }
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: User not found
+ */
+const deleteAccount = async (req, res, next) => {
+  try {
+    const { reason } = req.body || {};
+
+    const user = await User.findByPk(req.user.id);
+    if (!user) return response.notFound(res, 'User not found');
+
+    // Soft delete — sets deleted_at timestamp (paranoid: true on User model)
+    await user.destroy();
+
+    console.log(`Account soft-deleted: userId=${user.id} role=${user.role} reason="${reason || 'not provided'}"`);
+
+    return response.success(res, 'Account deleted successfully');
+  } catch (err) { next(err); }
+};
+
+module.exports = { getProfile, updateProfile, changePassword, deleteAccount };

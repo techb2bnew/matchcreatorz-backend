@@ -1,6 +1,8 @@
 'use strict';
-const { Job, User, Bid } = require('../../models');
-const { Op }             = require('sequelize');
+const { Job, User, Bid, SellerProfile } = require('../../models');
+const { Op, literal }    = require('sequelize');
+const notify             = require('../../helpers/notification.helper');
+const { applyConnects, BID_COST } = require('../../helpers/connects.helper');
 
 // ── Browse open jobs ──────────────────────────────────────────────────
 /**
@@ -36,9 +38,14 @@ exports.browseJobs = async (req, res) => {
     const where = { status: 'OPEN' };
 
     if (search && search.trim()) {
+      const term = search.trim();
+      const safe = term.replace(/'/g, "''");
       where[Op.or] = [
-        { title:       { [Op.iLike]: `%${search.trim()}%` } },
-        { description: { [Op.iLike]: `%${search.trim()}%` } },
+        { title:       { [Op.iLike]: `%${term}%` } },
+        { description: { [Op.iLike]: `%${term}%` } },
+        { category:    { [Op.iLike]: `%${term}%` } },
+        // searchable skills (stored as JSON array) — cast to text and match
+        literal(`CAST("Job"."skills" AS TEXT) ILIKE '%${safe}%'`),
       ];
     }
 
@@ -163,6 +170,15 @@ exports.placeBid = async (req, res) => {
     if (!amount || !delivery_days)
       return res.status(400).json({ success: false, message: 'Amount and delivery days are required' });
 
+    // Connects gate: seller must have enough connects to bid
+    const profile = await SellerProfile.findOne({ where: { user_id: req.user.id }, attributes: ['connects_balance'] });
+    if (!profile || Number(profile.connects_balance) < BID_COST) {
+      return res.status(400).json({
+        success: false,
+        message: `You need at least ${BID_COST} connect(s) to place a bid. Please top up.`,
+      });
+    }
+
     const bid = await Bid.create({
       job_id:        job.id,
       seller_id:     req.user.id,
@@ -172,8 +188,19 @@ exports.placeBid = async (req, res) => {
       status:        'pending',
     });
 
+    // Deduct connects (ledger + balance) — ref the job
+    await applyConnects(req.user.id, -BID_COST, 'bid_deduct', {
+      note:   `Bid on job #${job.id}`,
+      ref_id: job.id,
+    }).catch(() => {});
+
     // Increment bids_count on job
     await job.increment('bids_count');
+
+    // Notify buyer of new bid
+    const buyer = await User.findByPk(job.buyer_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
+    const seller = await User.findByPk(req.user.id, { attributes: ['id', 'name'] });
+    if (buyer && seller) notify.bidPlaced(buyer, job, seller);
 
     return res.status(201).json({ success: true, message: 'Bid placed successfully', data: bid });
   } catch (err) {
@@ -267,6 +294,19 @@ exports.withdrawBid = async (req, res) => {
 
     await bid.destroy();
     if (job.bids_count > 0) await job.decrement('bids_count');
+
+    // Refund the connect spent on this bid
+    await applyConnects(req.user.id, BID_COST, 'refund', {
+      note:   `Refund: withdrew bid on job #${job.id}`,
+      ref_id: job.id,
+    }).catch(() => {});
+
+    // Notify job owner (buyer) that bid was withdrawn
+    const [buyer, seller] = await Promise.all([
+      User.findByPk(job.buyer_id,  { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] }),
+      User.findByPk(req.user.id,   { attributes: ['id', 'name'] }),
+    ]);
+    if (buyer && seller) notify.bidWithdrawn(buyer, job, seller.name);
 
     return res.json({ success: true, message: 'Bid withdrawn successfully' });
   } catch (err) {

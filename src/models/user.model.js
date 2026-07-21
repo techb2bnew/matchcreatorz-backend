@@ -102,6 +102,17 @@ const User = sequelize.define('User', {
     allowNull: true,
   },
 
+  // FCM tokens for push notifications
+  web_fcm_token: {
+    type:      DataTypes.TEXT,
+    allowNull: true,
+  },
+
+  mobile_fcm_token: {
+    type:      DataTypes.TEXT,
+    allowNull: true,
+  },
+
 }, {
   tableName:  'users',
   timestamps: true,

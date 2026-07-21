@@ -1,6 +1,7 @@
 'use strict';
 const { Job, User, Bid, Booking } = require('../../models');
 const { Op }                      = require('sequelize');
+const notify                      = require('../../helpers/notification.helper');
 
 const FEE_PERCENT = 0.10;
 
@@ -389,6 +390,10 @@ exports.acceptBid = async (req, res) => {
       status:       'pending',
     });
 
+    // Notify seller their bid was accepted
+    const seller = await User.findByPk(bid.seller_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
+    if (seller) notify.bidAccepted(seller, job);
+
     return res.json({
       success: true,
       message: 'Bid accepted. Booking created successfully.',
@@ -440,6 +445,10 @@ exports.rejectBid = async (req, res) => {
       return res.status(400).json({ success: false, message: `Bid is already ${bid.status}` });
 
     await bid.update({ status: 'rejected' });
+
+    // Notify seller their bid was rejected
+    const seller = await User.findByPk(bid.seller_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
+    if (seller) notify.bidRejected(seller, job);
 
     return res.json({ success: true, message: 'Bid rejected', data: bid });
   } catch (err) {

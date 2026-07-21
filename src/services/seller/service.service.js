@@ -47,6 +47,13 @@ const createService = async (sellerId, data) => {
 
   const catIds = Array.isArray(category_ids) ? category_ids.map(Number).filter(Boolean) : [];
 
+  // Validate category IDs
+  if (catIds.length > 0) {
+    const found = await Category.count({ where: { id: catIds } });
+    if (found !== catIds.length)
+      throw { statusCode: 400, message: 'One or more category IDs are invalid' };
+  }
+
   const svc = await Service.create({
     seller_id:     sellerId,
     category_id:   catIds[0] || null,
@@ -77,6 +84,13 @@ const updateService = async (sellerId, id, data) => {
   const catIds = category_ids !== undefined
     ? (Array.isArray(category_ids) ? category_ids.map(Number).filter(Boolean) : [])
     : undefined;
+
+  // Validate that all supplied category IDs exist
+  if (catIds && catIds.length > 0) {
+    const found = await Category.count({ where: { id: catIds } });
+    if (found !== catIds.length)
+      throw { statusCode: 400, message: 'One or more category IDs are invalid' };
+  }
 
   await svc.update({
     ...(title         !== undefined && { title: title.trim() }),

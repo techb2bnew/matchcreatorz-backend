@@ -1,6 +1,7 @@
 'use strict';
-const { Review, Booking, Service, User } = require('../../models');
+const { Review, Booking, Service, User, SellerProfile } = require('../../models');
 const { fn, col } = require('sequelize');
+const notify      = require('../../helpers/notification.helper');
 
 const createReview = async (buyerId, { booking_id, rating, comment }) => {
   if (!booking_id || !rating)  throw { statusCode: 400, message: 'booking_id and rating are required' };
@@ -24,9 +25,20 @@ const createReview = async (buyerId, { booking_id, rating, comment }) => {
     status:     'published',
   });
 
-  // Recalculate service rating
+  // Recalculate service rating + seller aggregate rating
   if (booking.service_id) {
     await recalcServiceRating(booking.service_id);
+  }
+  await recalcSellerRating(booking.seller_id);
+
+  // Notify seller of new review
+  const seller = await User.findByPk(booking.seller_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
+  const buyer  = await User.findByPk(buyerId,           { attributes: ['id', 'name'] });
+  if (seller && buyer) {
+    const service = booking.service_id
+      ? await Service.findByPk(booking.service_id, { attributes: ['title'] })
+      : null;
+    notify.reviewReceived(seller, buyer.name, review.rating, service?.title || null);
   }
 
   return review;
@@ -59,11 +71,30 @@ async function recalcServiceRating(serviceId) {
   });
   await Service.update(
     {
-      rating:        Math.round(Number(agg.avg_rating || 0) * 10) / 10,
+      rating:        Math.round(Number(agg.avg_rating || 0) * 100) / 100,
       reviews_count: Number(agg.total || 0),
     },
     { where: { id: serviceId } }
   );
 }
 
-module.exports = { createReview, listMyReviews, recalcServiceRating };
+// Recompute the seller's aggregate rating across ALL their published reviews
+async function recalcSellerRating(sellerId) {
+  const agg = await Review.findOne({
+    where: { seller_id: sellerId, status: 'published' },
+    attributes: [
+      [fn('AVG', col('rating')), 'avg_rating'],
+      [fn('COUNT', col('id')),   'total'],
+    ],
+    raw: true,
+  });
+  await SellerProfile.update(
+    {
+      rating:        Math.round(Number(agg.avg_rating || 0) * 100) / 100,
+      total_reviews: Number(agg.total || 0),
+    },
+    { where: { user_id: sellerId } }
+  );
+}
+
+module.exports = { createReview, listMyReviews, recalcServiceRating, recalcSellerRating };

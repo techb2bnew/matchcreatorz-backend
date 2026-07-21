@@ -42,6 +42,16 @@ const env = {
   // App
   CLIENT_URL:  process.env.CLIENT_URL  || 'http://localhost:3000',
   OTP_EXPIRES_MIN: parseInt(process.env.OTP_EXPIRES_MIN, 10) || 10,
+
+  // Firebase FCM — mobile push notifications
+  FIREBASE_PROJECT_ID:   process.env.FIREBASE_PROJECT_ID   || '',
+  FIREBASE_CLIENT_EMAIL: process.env.FIREBASE_CLIENT_EMAIL || '',
+  FIREBASE_PRIVATE_KEY:  process.env.FIREBASE_PRIVATE_KEY  || '',
+
+  // Web Push (VAPID) — browser push notifications
+  VAPID_PUBLIC_KEY:  process.env.VAPID_PUBLIC_KEY  || '',
+  VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY || '',
+  VAPID_EMAIL:       process.env.VAPID_EMAIL       || '',
 };
 
 // Validate critical vars in production

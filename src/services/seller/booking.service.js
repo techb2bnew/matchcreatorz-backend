@@ -1,6 +1,7 @@
 'use strict';
 const { Op }                          = require('sequelize');
 const { Booking, User, Service, Job } = require('../../models');
+const notify                          = require('../../helpers/notification.helper');
 
 const INCLUDE = [
   { model: User,    as: 'buyer',   attributes: ['id', 'name'] },
@@ -44,6 +45,9 @@ exports.acceptOrder = async (sellerId, id) => {
     throw Object.assign(new Error('Booking is not pending'), { status: 400 });
 
   await booking.update({ status: 'ongoing' });
+  // Notify buyer that seller accepted
+  const buyer = await User.findByPk(booking.buyer_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
+  if (buyer) notify.bookingAccepted(buyer, booking);
   return booking;
 };
 
@@ -54,6 +58,9 @@ exports.submitWork = async (sellerId, id) => {
     throw Object.assign(new Error('Booking must be ongoing to submit work'), { status: 400 });
 
   await booking.update({ status: 'amidst_completion' });
+  // Notify buyer that work has been submitted
+  const buyer = await User.findByPk(booking.buyer_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
+  if (buyer) notify.workSubmitted(buyer, booking);
   return booking;
 };
 
@@ -64,5 +71,8 @@ exports.cancelBooking = async (sellerId, id, cancel_reason) => {
     throw Object.assign(new Error('Only pending bookings can be cancelled by seller'), { status: 400 });
 
   await booking.update({ status: 'cancelled', cancel_reason: cancel_reason || null });
+  // Notify buyer that seller cancelled
+  const buyer = await User.findByPk(booking.buyer_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
+  if (buyer) notify.bookingCancelledBySeller(buyer, booking);
   return booking;
 };

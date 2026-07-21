@@ -5,6 +5,7 @@ const env      = require('../../config/env');
 const { User, SellerProfile, BuyerProfile } = require('../../models/index');
 const { sendOtp }    = require('../../helpers/email.helper');
 const { sendSmsOtp } = require('../../helpers/sms.helper');
+const notify         = require('../../helpers/notification.helper');
 
 const generateOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 
@@ -75,6 +76,8 @@ const register = async (data) => {
   await user.update({ otp, otp_expiry, phone_otp, phone_otp_expiry });
 
   // Fire-and-forget — don't fail registration if notifications fail
+  notify.welcome(user);
+
   sendOtp(user.email, user.name, otp).catch(err =>
     console.error('⚠️  OTP email failed:', err.message)
   );
@@ -104,11 +107,15 @@ const register = async (data) => {
 const login = async ({ email, phone, password }) => {
   if (!email && !phone) throw { statusCode: 400, message: 'Email or phone is required' };
 
-  // Find by email OR phone
+  // Find by email OR phone — paranoid:false so deleted users are also found
   const { Op } = require('sequelize');
   const where = email ? { email } : { phone };
-  const user = await User.findOne({ where });
+  const user = await User.findOne({ where, paranoid: false });
   if (!user) throw { statusCode: 401, message: 'Invalid credentials' };
+
+  // Soft-deleted account
+  if (user.deletedAt || user.deleted_at)
+    throw { statusCode: 403, message: 'This account has been deleted. Please contact support if you think this is a mistake.' };
 
   if (user.status === 'banned')   throw { statusCode: 403, message: 'Account is banned' };
   if (user.status === 'inactive') throw { statusCode: 403, message: 'Account is inactive' };
