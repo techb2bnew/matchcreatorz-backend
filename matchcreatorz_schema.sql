@@ -28,7 +28,10 @@ DO $$ BEGIN
   CREATE TYPE "public"."enum_jobs_status" AS ENUM ('OPEN', 'IN_PROGRESS', 'CLOSED', 'CANCELLED');
 EXCEPTION WHEN duplicate_object THEN null; END $$;
 DO $$ BEGIN
-  CREATE TYPE "public"."enum_bids_status" AS ENUM ('pending', 'accepted', 'rejected');
+  CREATE TYPE "public"."enum_bids_status" AS ENUM ('pending', 'countered', 'accepted', 'rejected');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+DO $$ BEGIN
+  CREATE TYPE "public"."enum_bids_counter_by" AS ENUM ('buyer', 'seller');
 EXCEPTION WHEN duplicate_object THEN null; END $$;
 DO $$ BEGIN
   CREATE TYPE "public"."enum_bookings_status" AS ENUM ('pending', 'ongoing', 'amidst_completion', 'completed', 'cancelled', 'in_dispute');
@@ -64,7 +67,7 @@ CREATE TABLE IF NOT EXISTS "services" ("id"  SERIAL , "seller_id" INTEGER NOT NU
 CREATE TABLE IF NOT EXISTS "jobs" ("id"  SERIAL , "buyer_id" INTEGER NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE, "title" VARCHAR(200) NOT NULL, "description" TEXT, "category" VARCHAR(100) NOT NULL DEFAULT 'General', "job_type" "public"."enum_jobs_job_type" NOT NULL DEFAULT 'fixed', "budget_min" DECIMAL(10,2), "budget_max" DECIMAL(10,2), "deadline" DATE, "skills" JSON DEFAULT '[]', "experience_level" "public"."enum_jobs_experience_level" NOT NULL DEFAULT 'any', "status" "public"."enum_jobs_status" NOT NULL DEFAULT 'OPEN', "bids_count" INTEGER NOT NULL DEFAULT 0, "created_at" TIMESTAMP WITH TIME ZONE NOT NULL, "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL, "deleted_at" TIMESTAMP WITH TIME ZONE, PRIMARY KEY ("id"));
 
 -- Bid
-CREATE TABLE IF NOT EXISTS "bids" ("id"  SERIAL , "job_id" INTEGER NOT NULL REFERENCES "jobs" ("id") ON DELETE CASCADE ON UPDATE CASCADE, "seller_id" INTEGER NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE, "amount" DECIMAL(10,2) NOT NULL, "delivery_days" INTEGER NOT NULL, "proposal" TEXT, "status" "public"."enum_bids_status" NOT NULL DEFAULT 'pending', "created_at" TIMESTAMP WITH TIME ZONE NOT NULL, "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL, "deleted_at" TIMESTAMP WITH TIME ZONE, PRIMARY KEY ("id"));
+CREATE TABLE IF NOT EXISTS "bids" ("id"  SERIAL , "job_id" INTEGER NOT NULL REFERENCES "jobs" ("id") ON DELETE CASCADE ON UPDATE CASCADE, "seller_id" INTEGER NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE, "amount" DECIMAL(10,2) NOT NULL, "delivery_days" INTEGER NOT NULL, "proposal" TEXT, "status" "public"."enum_bids_status" NOT NULL DEFAULT 'pending', "counter_amount" DECIMAL(10,2), "counter_delivery_days" INTEGER, "counter_by" "public"."enum_bids_counter_by", "counter_note" TEXT, "created_at" TIMESTAMP WITH TIME ZONE NOT NULL, "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL, "deleted_at" TIMESTAMP WITH TIME ZONE, PRIMARY KEY ("id"));
 
 -- Booking
 CREATE TABLE IF NOT EXISTS "bookings" ("id"  SERIAL , "buyer_id" INTEGER NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE, "seller_id" INTEGER NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE, "service_id" INTEGER REFERENCES "services" ("id") ON DELETE SET NULL ON UPDATE CASCADE, "job_id" INTEGER REFERENCES "jobs" ("id") ON DELETE SET NULL ON UPDATE CASCADE, "title" VARCHAR(200) NOT NULL, "amount" DECIMAL(10,2) NOT NULL, "platform_fee" DECIMAL(10,2) NOT NULL DEFAULT 0, "status" "public"."enum_bookings_status" NOT NULL DEFAULT 'pending', "notes" TEXT, "cancel_reason" TEXT, "dispute_reason" TEXT, "delivery_days" INTEGER, "created_at" TIMESTAMP WITH TIME ZONE NOT NULL, "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL, "deleted_at" TIMESTAMP WITH TIME ZONE, PRIMARY KEY ("id"));
@@ -84,25 +87,29 @@ CREATE TABLE IF NOT EXISTS "connect_transactions" ("id"  SERIAL , "seller_id" IN
 -- Offer
 CREATE TABLE IF NOT EXISTS "offers" ("id"  SERIAL , "seller_id" INTEGER NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE, "buyer_id" INTEGER NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE, "service_id" INTEGER REFERENCES "services" ("id") ON DELETE SET NULL ON UPDATE CASCADE, "title" VARCHAR(200) NOT NULL, "description" TEXT, "amount" DECIMAL(10,2) NOT NULL, "delivery_days" INTEGER, "status" "public"."enum_offers_status" NOT NULL DEFAULT 'pending', "booking_id" INTEGER REFERENCES "bookings" ("id") ON DELETE SET NULL ON UPDATE CASCADE, "expires_at" TIMESTAMP WITH TIME ZONE, "created_at" TIMESTAMP WITH TIME ZONE NOT NULL, "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL, "deleted_at" TIMESTAMP WITH TIME ZONE, PRIMARY KEY ("id"));
 
+-- AppSetting
+CREATE TABLE IF NOT EXISTS "app_settings" ("id"  SERIAL , "key" VARCHAR(100) NOT NULL UNIQUE, "value" JSONB DEFAULT '{}', "created_at" TIMESTAMP WITH TIME ZONE NOT NULL, "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL, PRIMARY KEY ("id"));
+
 -- ---------- INDEXES ----------
 CREATE UNIQUE INDEX IF NOT EXISTS "favourites_user_id_service_id" ON "favourites" ("user_id", "service_id");
-CREATE INDEX IF NOT EXISTS "services_seller_id" ON "services" ("seller_id");
-CREATE INDEX IF NOT EXISTS "services_category_id" ON "services" ("category_id");
-CREATE INDEX IF NOT EXISTS "services_status" ON "services" ("status");
-CREATE INDEX IF NOT EXISTS "jobs_status" ON "jobs" ("status");
-CREATE INDEX IF NOT EXISTS "bids_job_id" ON "bids" ("job_id");
-CREATE INDEX IF NOT EXISTS "bookings_buyer_id" ON "bookings" ("buyer_id");
-CREATE INDEX IF NOT EXISTS "bookings_seller_id" ON "bookings" ("seller_id");
-CREATE INDEX IF NOT EXISTS "reviews_seller_id" ON "reviews" ("seller_id");
-CREATE INDEX IF NOT EXISTS "notifications_user_id" ON "notifications" ("user_id");
-CREATE INDEX IF NOT EXISTS "offers_buyer_id" ON "offers" ("buyer_id");
-CREATE INDEX IF NOT EXISTS "offers_seller_id" ON "offers" ("seller_id");
-CREATE INDEX IF NOT EXISTS "connect_transactions_seller_id" ON "connect_transactions" ("seller_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "app_settings_key" ON "app_settings" ("key");
+CREATE INDEX IF NOT EXISTS "services_seller_id ON "services" ("seller_id")";
+CREATE INDEX IF NOT EXISTS "services_category_id ON "services" ("category_id")";
+CREATE INDEX IF NOT EXISTS "services_status ON "services" ("status")";
+CREATE INDEX IF NOT EXISTS "jobs_status ON "jobs" ("status")";
+CREATE INDEX IF NOT EXISTS "bids_job_id ON "bids" ("job_id")";
+CREATE INDEX IF NOT EXISTS "bookings_buyer_id ON "bookings" ("buyer_id")";
+CREATE INDEX IF NOT EXISTS "bookings_seller_id ON "bookings" ("seller_id")";
+CREATE INDEX IF NOT EXISTS "reviews_seller_id ON "reviews" ("seller_id")";
+CREATE INDEX IF NOT EXISTS "notifications_user_id ON "notifications" ("user_id")";
+CREATE INDEX IF NOT EXISTS "offers_buyer_id ON "offers" ("buyer_id")";
+CREATE INDEX IF NOT EXISTS "offers_seller_id ON "offers" ("seller_id")";
+CREATE INDEX IF NOT EXISTS "connect_transactions_seller_id ON "connect_transactions" ("seller_id")";
 
 -- ---------- SEED DATA ----------
 -- Default admin (email: admin@matchcreatorz.com  password: Admin@123)
 INSERT INTO "users" ("name","email","password","role","status","is_verified","created_at","updated_at")
-VALUES ('Super Admin','admin@matchcreatorz.com','$2a$12$moIpxH1/4sBgKSOB7FR.qOh3JwOyDtqX/DCim.Lf1o87/TcZOCUou','ADMIN','active',true,NOW(),NOW())
+VALUES ('Super Admin','admin@matchcreatorz.com','$2a$12$RzzzdF13qp77VJYRVAE7aOe.OxUaHyrlurIOIqQCpZM1dNLmc/c9m','ADMIN','active',true,NOW(),NOW())
 ON CONFLICT ("email") DO NOTHING;
 
 -- Starter categories

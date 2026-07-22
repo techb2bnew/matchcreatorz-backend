@@ -13,6 +13,7 @@ const Notification  = require('./notification.model');
 const Favourite     = require('./favourite.model');
 const ConnectTransaction = require('./connectTransaction.model');
 const Offer         = require('./offer.model');
+const AppSetting    = require('./appSetting.model');
 
 // ── Associations ──────────────────────────────────────────
 
@@ -109,6 +110,7 @@ const db = {
   Favourite,
   ConnectTransaction,
   Offer,
+  AppSetting,
 };
 
 module.exports = db;

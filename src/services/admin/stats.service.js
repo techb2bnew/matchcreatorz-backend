@@ -20,7 +20,8 @@ exports.getDashboardStats = async () => {
     totalJobs,
     openJobs,
   ] = await Promise.all([
-    User.count({ where: { role: { [Op.ne]: null } } }),
+    // Total users = buyers + sellers only (exclude ADMIN accounts)
+    User.count({ where: { role: { [Op.in]: ['SELLER', 'BUYER'] } } }),
     User.count({ where: { role: 'SELLER' } }),
     User.count({ where: { role: 'BUYER'  } }),
     Service.count(),

@@ -51,17 +51,17 @@ exports.getDashboardStats = async (buyerId) => {
       raw: true,
     }),
 
-    // Recent 3 jobs
+    // Recent 3 jobs (exclude soft-deleted)
     Job.findAll({
       where:      { buyer_id: buyerId },
       order:      [['created_at', 'DESC']],
       limit:      3,
       attributes: ['id', 'title', 'status', 'bids_count', 'budget_min', 'budget_max', 'created_at'],
-      paranoid:   false,
     }).catch(() => []),
 
-    Job.count({ where: { buyer_id: buyerId }, paranoid: false }).catch(() => 0),
-    Job.count({ where: { buyer_id: buyerId, status: 'OPEN' }, paranoid: false }).catch(() => 0),
+    // Counts exclude soft-deleted jobs so they match the My Jobs list
+    Job.count({ where: { buyer_id: buyerId } }).catch(() => 0),
+    Job.count({ where: { buyer_id: buyerId, status: 'OPEN' } }).catch(() => 0),
   ]);
 
   const result = {

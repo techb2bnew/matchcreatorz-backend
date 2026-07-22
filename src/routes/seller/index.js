@@ -9,12 +9,13 @@ const { getSellerProfile, updateSellerProfile } = require('../../controllers/sel
 const { changePassword, deleteAccount } = require('../../controllers/shared/profile.controller');
 const { registerFcmToken, clearFcmToken } = require('../../controllers/shared/fcm.controller');
 const { listNotifications, getUnreadCount, markOneRead, markAllRead, deleteOne: deleteNotification } = require('../../controllers/shared/notification.controller');
-const { browseJobs, getJobDetail, placeBid, updateBid, withdrawBid, myBids } = require('../../controllers/seller/job.controller');
+const { browseJobs, getJobDetail, placeBid, updateBid, withdrawBid, myBids, counterBidBySeller, acceptCounterBySeller } = require('../../controllers/seller/job.controller');
 const { listBookings: listSellerBookings, getBooking: getSellerBooking, acceptOrder, submitWork, cancelBooking: cancelSellerBooking } = require('../../controllers/seller/booking.controller');
 const { listReviews: listSellerReviews } = require('../../controllers/seller/review.controller');
 const { getStats: getSellerStats }       = require('../../controllers/seller/stats.controller');
 const { getBalance: getConnectsBalance, getHistory: getConnectsHistory } = require('../../controllers/seller/connect.controller');
 const { sendOffer, listSentOffers, withdrawOffer } = require('../../controllers/shared/offer.controller');
+const { searchBuyers } = require('../../controllers/seller/buyer.controller');
 
 const imageUpload = multer({
   storage: multer.memoryStorage(),
@@ -72,9 +73,11 @@ router.patch ('/bookings/:id/cancel',   cancelSellerBooking);
 router.get   ('/bids',           myBids);
 router.get   ('/jobs',           browseJobs);
 router.get   ('/jobs/:id',       getJobDetail);
-router.post  ('/jobs/:id/bid',   placeBid);
-router.patch ('/jobs/:id/bid',   updateBid);
-router.delete('/jobs/:id/bid',   withdrawBid);
+router.post  ('/jobs/:id/bid',         placeBid);
+router.patch ('/jobs/:id/bid',         updateBid);
+router.delete('/jobs/:id/bid',         withdrawBid);
+router.patch ('/jobs/:id/bid/counter', counterBidBySeller);
+router.patch ('/jobs/:id/bid/accept',  acceptCounterBySeller);
 
 // ── Stats ──────────────────────────────────────────────────────────────
 router.get('/stats', getSellerStats);
@@ -85,6 +88,9 @@ router.get('/reviews', listSellerReviews);
 // ── Connects ───────────────────────────────────────────────────────────
 router.get('/connects/balance', getConnectsBalance);
 router.get('/connects/history', getConnectsHistory);
+
+// ── Buyer lookup (for offer picker) ────────────────────────────────────
+router.get   ('/buyers',     searchBuyers);
 
 // ── Offers (sent) ──────────────────────────────────────────────────────
 router.get   ('/offers',     listSentOffers);

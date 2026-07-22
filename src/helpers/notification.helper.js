@@ -242,6 +242,19 @@ const offerReceived = (buyer, sellerName, offer) => {
   );
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// BID COUNTER / NEGOTIATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+const bidCountered = (recipient, job, byRole, amount) => {
+  const who = byRole === 'buyer' ? 'Buyer' : 'Seller';
+  push(recipient,
+    'Counter Offer 🔁',
+    `${who} countered on "${job.title}" — new amount $${amount}`,
+    { type: 'bid_countered', job_id: String(job.id), by: byRole, amount: String(amount) }
+  );
+};
+
 module.exports = {
   // auth
   welcome,
@@ -271,4 +284,5 @@ module.exports = {
   // connects
   connectsAdded,
   offerReceived,
+  bidCountered,
 };

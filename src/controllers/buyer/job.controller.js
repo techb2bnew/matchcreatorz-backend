@@ -319,6 +319,72 @@ exports.getJobBids = async (req, res) => {
   }
 };
 
+// -- Buyer counters a bid -------------------------------------------------
+/**
+ * @swagger
+ * /api/v1/buyer/jobs/{id}/bids/{bidId}/counter:
+ *   patch:
+ *     summary: Counter a bid with a new amount / delivery (negotiation)
+ *     tags: [Buyer - Jobs]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *       - in: path
+ *         name: bidId
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [amount]
+ *             properties:
+ *               amount:        { type: number }
+ *               delivery_days: { type: integer }
+ *               note:          { type: string }
+ *     responses:
+ *       200: { description: Counter offer sent to seller }
+ *       404: { description: Job or bid not found }
+ */
+exports.counterBid = async (req, res) => {
+  try {
+    const job = await Job.findOne({ where: { id: req.params.id, buyer_id: req.user.id } });
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+    if (job.status !== 'OPEN')
+      return res.status(400).json({ success: false, message: 'Job is not open for negotiation' });
+
+    const bid = await Bid.findOne({ where: { id: req.params.bidId, job_id: job.id } });
+    if (!bid) return res.status(404).json({ success: false, message: 'Bid not found' });
+    if (['accepted', 'rejected'].includes(bid.status))
+      return res.status(400).json({ success: false, message: `Bid is already ${bid.status}` });
+
+    const { amount, delivery_days, note } = req.body;
+    if (!amount || Number(amount) <= 0)
+      return res.status(400).json({ success: false, message: 'A valid counter amount is required' });
+
+    await bid.update({
+      status:                'countered',
+      counter_amount:        Number(amount),
+      counter_delivery_days: delivery_days ? Number(delivery_days) : bid.delivery_days,
+      counter_by:            'buyer',
+      counter_note:          note || null,
+    });
+
+    const seller = await User.findByPk(bid.seller_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
+    if (seller && notify.bidCountered) notify.bidCountered(seller, job, 'buyer', Number(amount));
+
+    return res.json({ success: true, message: 'Counter offer sent', data: bid });
+  } catch (err) {
+    console.error('counterBid:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
 // -- Accept a bid + auto-create booking -----------------------------------
 /**
  * @swagger
@@ -363,7 +429,11 @@ exports.acceptBid = async (req, res) => {
     if (existing)
       return res.status(400).json({ success: false, message: 'A booking already exists for this job' });
 
-    const fee = Math.round(Number(bid.amount) * FEE_PERCENT * 100) / 100;
+    // Effective terms = the current counter on the table (if any), else the original bid
+    const effAmount   = bid.counter_amount != null ? Number(bid.counter_amount) : Number(bid.amount);
+    const effDelivery = bid.counter_amount != null && bid.counter_delivery_days != null
+      ? bid.counter_delivery_days : bid.delivery_days;
+    const fee = Math.round(effAmount * FEE_PERCENT * 100) / 100;
 
     // 1. Update bid status
     await bid.update({ status: 'accepted' });
@@ -377,16 +447,16 @@ exports.acceptBid = async (req, res) => {
     // 3. Update job status to IN_PROGRESS
     await job.update({ status: 'IN_PROGRESS' });
 
-    // 4. Create booking
+    // 4. Create booking at the agreed (effective) terms
     const booking = await Booking.create({
       buyer_id:     req.user.id,
       seller_id:    bid.seller_id,
       job_id:       job.id,
       service_id:   null,
       title:        job.title,
-      amount:       Number(bid.amount),
+      amount:       effAmount,
       platform_fee: fee,
-      delivery_days: bid.delivery_days,
+      delivery_days: effDelivery,
       status:       'pending',
     });
 
@@ -441,7 +511,7 @@ exports.rejectBid = async (req, res) => {
 
     const bid = await Bid.findOne({ where: { id: req.params.bidId, job_id: job.id } });
     if (!bid) return res.status(404).json({ success: false, message: 'Bid not found' });
-    if (bid.status !== 'pending')
+    if (!['pending', 'countered'].includes(bid.status))
       return res.status(400).json({ success: false, message: `Bid is already ${bid.status}` });
 
     await bid.update({ status: 'rejected' });

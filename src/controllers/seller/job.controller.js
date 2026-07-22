@@ -1,8 +1,10 @@
 'use strict';
-const { Job, User, Bid, SellerProfile } = require('../../models');
+const { Job, User, Bid, SellerProfile, Booking } = require('../../models');
 const { Op, literal }    = require('sequelize');
 const notify             = require('../../helpers/notification.helper');
 const { applyConnects, BID_COST } = require('../../helpers/connects.helper');
+
+const FEE_PERCENT = 0.10;
 
 // ── Browse open jobs ──────────────────────────────────────────────────
 /**
@@ -66,7 +68,8 @@ exports.browseJobs = async (req, res) => {
     const jobIds = rows.map(j => j.id);
     const myBids = await Bid.findAll({
       where:      { seller_id: req.user.id, job_id: { [Op.in]: jobIds } },
-      attributes: ['id', 'job_id', 'amount', 'delivery_days', 'proposal', 'status'],
+      attributes: ['id', 'job_id', 'amount', 'delivery_days', 'proposal', 'status',
+                   'counter_amount', 'counter_delivery_days', 'counter_by', 'counter_note'],
     });
     const bidMap = new Map(myBids.map(b => [b.job_id, b]));
 
@@ -311,6 +314,129 @@ exports.withdrawBid = async (req, res) => {
     return res.json({ success: true, message: 'Bid withdrawn successfully' });
   } catch (err) {
     console.error('withdrawBid:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// -- Seller counters back on their bid ----------------------------------------
+/**
+ * @swagger
+ * /api/v1/seller/jobs/{id}/bid/counter:
+ *   patch:
+ *     summary: Counter back after the buyer countered your bid
+ *     tags: [Seller - Jobs]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [amount]
+ *             properties:
+ *               amount:        { type: number }
+ *               delivery_days: { type: integer }
+ *               note:          { type: string }
+ *     responses:
+ *       200: { description: Counter offer sent to buyer }
+ *       404: { description: Job or bid not found }
+ */
+exports.counterBidBySeller = async (req, res) => {
+  try {
+    const job = await Job.findOne({ where: { id: req.params.id, status: 'OPEN' } });
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found or not open' });
+
+    const bid = await Bid.findOne({ where: { job_id: job.id, seller_id: req.user.id } });
+    if (!bid) return res.status(404).json({ success: false, message: 'You have not bid on this job' });
+    if (['accepted', 'rejected'].includes(bid.status))
+      return res.status(400).json({ success: false, message: `Bid is already ${bid.status}` });
+
+    const { amount, delivery_days, note } = req.body;
+    if (!amount || Number(amount) <= 0)
+      return res.status(400).json({ success: false, message: 'A valid counter amount is required' });
+
+    await bid.update({
+      status:                'countered',
+      counter_amount:        Number(amount),
+      counter_delivery_days: delivery_days ? Number(delivery_days) : bid.delivery_days,
+      counter_by:            'seller',
+      counter_note:          note || null,
+    });
+
+    const buyer = await User.findByPk(job.buyer_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
+    if (buyer && notify.bidCountered) notify.bidCountered(buyer, job, 'seller', Number(amount));
+
+    return res.json({ success: true, message: 'Counter offer sent to buyer', data: bid });
+  } catch (err) {
+    console.error('counterBidBySeller:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// -- Seller accepts the buyer's counter → booking -----------------------------
+/**
+ * @swagger
+ * /api/v1/seller/jobs/{id}/bid/accept:
+ *   patch:
+ *     summary: Accept the buyer's counter offer (creates a booking)
+ *     tags: [Seller - Jobs]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: Counter accepted, booking created }
+ *       400: { description: No buyer counter to accept }
+ *       404: { description: Job or bid not found }
+ */
+exports.acceptCounterBySeller = async (req, res) => {
+  try {
+    const job = await Job.findOne({ where: { id: req.params.id, status: 'OPEN' } });
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found or not open' });
+
+    const bid = await Bid.findOne({ where: { job_id: job.id, seller_id: req.user.id } });
+    if (!bid) return res.status(404).json({ success: false, message: 'You have not bid on this job' });
+    if (bid.status !== 'countered' || bid.counter_by !== 'buyer')
+      return res.status(400).json({ success: false, message: 'There is no buyer counter to accept' });
+
+    const existing = await Booking.findOne({ where: { job_id: job.id } });
+    if (existing)
+      return res.status(400).json({ success: false, message: 'A booking already exists for this job' });
+
+    const effAmount   = Number(bid.counter_amount);
+    const effDelivery = bid.counter_delivery_days != null ? bid.counter_delivery_days : bid.delivery_days;
+    const fee = Math.round(effAmount * FEE_PERCENT * 100) / 100;
+
+    await bid.update({ status: 'accepted' });
+    await Bid.update({ status: 'rejected' }, { where: { job_id: job.id, id: { [Op.ne]: bid.id } } });
+    await job.update({ status: 'IN_PROGRESS' });
+
+    const booking = await Booking.create({
+      buyer_id:      job.buyer_id,
+      seller_id:     req.user.id,
+      job_id:        job.id,
+      service_id:    null,
+      title:         job.title,
+      amount:        effAmount,
+      platform_fee:  fee,
+      delivery_days: effDelivery,
+      status:        'pending',
+    });
+
+    // Notify buyer their counter was accepted (booking created)
+    const buyer = await User.findByPk(job.buyer_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
+    if (buyer) notify.bookingCreated(buyer, booking);
+
+    return res.json({ success: true, message: 'Counter accepted. Booking created.', data: { booking, bid } });
+  } catch (err) {
+    console.error('acceptCounterBySeller:', err);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };

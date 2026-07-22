@@ -34,9 +34,33 @@ const Bid = sequelize.define('Bid', {
   },
 
   status: {
-    type:         DataTypes.ENUM('pending', 'accepted', 'rejected'),
+    type:         DataTypes.ENUM('pending', 'countered', 'accepted', 'rejected'),
     allowNull:    false,
     defaultValue: 'pending',
+  },
+
+  // ── Counter-offer / negotiation ──────────────────────────────
+  // The latest counter on the table. If counter_amount is set, the
+  // "current" terms are these values; otherwise the original amount/delivery.
+  counter_amount: {
+    type:      DataTypes.DECIMAL(10, 2),
+    allowNull: true,
+  },
+
+  counter_delivery_days: {
+    type:      DataTypes.INTEGER,
+    allowNull: true,
+  },
+
+  // who made the last counter — the OTHER party must respond
+  counter_by: {
+    type:      DataTypes.ENUM('buyer', 'seller'),
+    allowNull: true,
+  },
+
+  counter_note: {
+    type:      DataTypes.TEXT,
+    allowNull: true,
   },
 
 }, {

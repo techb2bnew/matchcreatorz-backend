@@ -6,7 +6,7 @@ const { registerFcmToken, clearFcmToken } = require('../../controllers/shared/fc
 const { listNotifications, getUnreadCount, markOneRead, markAllRead, deleteOne: deleteNotification } = require('../../controllers/shared/notification.controller');
 const {
   listMyJobs, getJob, createJob, updateJob, closeJob, deleteJob,
-  getJobBids, acceptBid, rejectBid,
+  getJobBids, acceptBid, rejectBid, counterBid,
 } = require('../../controllers/buyer/job.controller');
 const { searchServices } = require('../../controllers/buyer/service.controller');
 const { listBookings, getBooking, createBooking, acceptWork, rejectWork, cancelBooking } = require('../../controllers/buyer/booking.controller');
@@ -69,7 +69,8 @@ router.put   ('/jobs/:id',      updateJob);
 router.patch ('/jobs/:id/close',              closeJob);
 router.delete('/jobs/:id',                    deleteJob);
 router.get   ('/jobs/:id/bids',               getJobBids);
-router.patch ('/jobs/:id/bids/:bidId/accept', acceptBid);
-router.patch ('/jobs/:id/bids/:bidId/reject', rejectBid);
+router.patch ('/jobs/:id/bids/:bidId/accept',  acceptBid);
+router.patch ('/jobs/:id/bids/:bidId/reject',  rejectBid);
+router.patch ('/jobs/:id/bids/:bidId/counter', counterBid);
 
 module.exports = router;
