@@ -2,6 +2,7 @@
 const { Op, literal } = require('sequelize');
 const { Job, User, Bid } = require('../../models');
 const response = require('../../helpers/response.helper');
+const { stripHtml } = require('../../helpers/text.helper');
 
 /**
  * @swagger
@@ -67,7 +68,13 @@ exports.listJobs = async (req, res, next) => {
       paranoid: false,
     });
 
-    return response.paginate(res, 'Jobs fetched', rows, { total: count, page, limit });
+    const data = rows.map((r) => {
+      const j = r.toJSON();
+      j.description = stripHtml(j.description);
+      return j;
+    });
+
+    return response.paginate(res, 'Jobs fetched', data, { total: count, page, limit });
   } catch (err) { next(err); }
 };
 

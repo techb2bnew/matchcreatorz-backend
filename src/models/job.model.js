@@ -55,6 +55,13 @@ const Job = sequelize.define('Job', {
     defaultValue: [],
   },
 
+  // Attached documents: array of { url, name }
+  attachments: {
+    type:         DataTypes.JSONB,
+    allowNull:    true,
+    defaultValue: [],
+  },
+
   experience_level: {
     type:         DataTypes.ENUM('any', 'beginner', 'intermediate', 'expert'),
     allowNull:    false,

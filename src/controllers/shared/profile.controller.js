@@ -1,6 +1,6 @@
 'use strict';
 const bcrypt   = require('bcryptjs');
-const User     = require('../../models/user.model');
+const { User, SellerProfile } = require('../../models');
 const response = require('../../helpers/response.helper');
 
 /**
@@ -354,4 +354,87 @@ const deleteAccount = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getProfile, updateProfile, changePassword, deleteAccount };
+/**
+ * @swagger
+ * tags:
+ *   - name: Seller - Settings
+ *     description: Seller settings & preferences (notifications, privacy, payout)
+ *   - name: Buyer - Settings
+ *     description: Buyer settings & preferences (notifications, privacy)
+ *
+ * /api/v1/seller/preferences:
+ *   get:
+ *     summary: Get my settings/preferences
+ *     tags: [Seller - Settings]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Preferences object }
+ *   put:
+ *     summary: Update my settings/preferences (shallow-merged per group)
+ *     tags: [Seller - Settings]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             example: { notifications: { email: true, sms: false, jobAlert: true, bookingAlert: true, payAlert: true, chatAlert: false, offerAlert: true }, privacy: { showProfile: true, showEarnings: false, showRating: true, available: true, twoFactor: false }, payout: { minPayout: 500, payMethod: "bank", autoWithdraw: false } }
+ *     responses:
+ *       200: { description: Preferences saved }
+ *
+ * /api/v1/buyer/preferences:
+ *   get:
+ *     summary: Get my settings/preferences
+ *     tags: [Buyer - Settings]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Preferences object }
+ *   put:
+ *     summary: Update my settings/preferences (shallow-merged per group)
+ *     tags: [Buyer - Settings]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             example: { notifications: { email: true, sms: false }, privacy: { showProfile: true } }
+ *     responses:
+ *       200: { description: Preferences saved }
+ */
+const getPreferences = async (req, res, next) => {
+  try {
+    const user = await User.findByPk(req.user.id, { attributes: ['preferences'] });
+    if (!user) return response.notFound(res, 'User not found');
+    return response.success(res, 'Preferences fetched', user.preferences || {});
+  } catch (err) { next(err); }
+};
+
+const updatePreferences = async (req, res, next) => {
+  try {
+    const user = await User.findByPk(req.user.id);
+    if (!user) return response.notFound(res, 'User not found');
+    const current = user.preferences || {};
+    const incoming = req.body || {};
+    // shallow-merge each top-level group (notifications / privacy / payout)
+    const merged = { ...current };
+    for (const [group, val] of Object.entries(incoming)) {
+      merged[group] = (val && typeof val === 'object' && !Array.isArray(val))
+        ? { ...(current[group] || {}), ...val }
+        : val;
+    }
+    await user.update({ preferences: merged });
+
+    // Enforce seller "Available for Work" → canonical SellerProfile.is_available
+    if (user.role === 'SELLER' && incoming.privacy && incoming.privacy.available !== undefined) {
+      await SellerProfile.update(
+        { is_available: !!incoming.privacy.available },
+        { where: { user_id: user.id } }
+      ).catch(() => {});
+    }
+
+    return response.success(res, 'Preferences saved', merged);
+  } catch (err) { next(err); }
+};
+
+module.exports = { getProfile, updateProfile, changePassword, deleteAccount, getPreferences, updatePreferences };

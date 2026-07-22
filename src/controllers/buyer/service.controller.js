@@ -2,6 +2,7 @@
 const { Op, literal }                    = require('sequelize');
 const { Service, User, Category }        = require('../../models');
 const response                           = require('../../helpers/response.helper');
+const { stripHtml }                      = require('../../helpers/text.helper');
 
 /**
  * @swagger
@@ -101,7 +102,11 @@ exports.searchServices = async (req, res) => {
         {
           model:      User,
           as:         'seller',
-          attributes: ['id', 'name'],
+          attributes: ['id', 'name', 'preferences'],
+          required:   true,
+          // Respect seller "Profile Visibility" — hide services of sellers who turned it off.
+          // Included unless preferences.privacy.showProfile is explicitly false.
+          where: literal(`COALESCE("seller"."preferences"->'privacy'->>'showProfile', 'true') <> 'false'`),
         },
         {
           model:      Category,
@@ -117,7 +122,20 @@ exports.searchServices = async (req, res) => {
       distinct: true,
     });
 
-    return response.paginate(res, 'Services fetched', rows, {
+    // Respect seller "Show Ratings" — hide rating on services whose seller opted out
+    const data = rows.map((r) => {
+      const j = r.toJSON();
+      j.description = stripHtml(j.description);   // clean preview in list
+      const showRating = j.seller?.preferences?.privacy?.showRating;
+      if (showRating === false) {
+        j.rating = null;
+        j.reviews_count = 0;
+      }
+      if (j.seller) delete j.seller.preferences; // don't leak prefs to buyers
+      return j;
+    });
+
+    return response.paginate(res, 'Services fetched', data, {
       total: count,
       page:  Number(page),
       limit: Number(limit),

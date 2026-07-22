@@ -13,6 +13,11 @@ const { errorHandler, notFoundHandler } = require('./middlewares/error.middlewar
 
 const app = express();
 
+// Behind a reverse proxy (nginx / load balancer on the server) — trust the
+// first proxy hop so express-rate-limit reads the real client IP from
+// X-Forwarded-For instead of throwing ERR_ERL_UNEXPECTED_X_FORWARDED_FOR.
+app.set('trust proxy', 1);
+
 // ── Security ─────────────────────────────────────────────────
 // Relax helmet CSP so Swagger UI loads correctly
 app.use(helmet({ contentSecurityPolicy: false }));

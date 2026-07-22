@@ -555,9 +555,43 @@ const resetPassword = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+/**
+ * @swagger
+ * /api/v1/auth/google:
+ *   post:
+ *     summary: Sign in / sign up with Google
+ *     description: |
+ *       Send the Google ID-token (`credential`) obtained from Google Identity Services.
+ *       - Existing user → returns `{ token, role, user }`.
+ *       - New user without `role` → returns `{ isNew: true, profile }` so the client can ask for a role.
+ *       - New user with `role` (BUYER|SELLER) → creates the account. BUYER logs in immediately; SELLER is created pending admin approval.
+ *     tags: [Auth]
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [credential]
+ *             properties:
+ *               credential: { type: string, description: Google ID token (JWT) from GSI }
+ *               role:       { type: string, enum: [BUYER, SELLER], description: Required only when completing a new signup }
+ *     responses:
+ *       200: { description: Logged in, or isNew/pendingApproval info }
+ *       401: { description: Invalid Google token }
+ */
+const google = async (req, res, next) => {
+  try {
+    const result = await authService.googleAuth(req.body);
+    return response.success(res, result.token ? 'Login successful' : 'Google verified', result);
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   register, login, logout,
   verifyOtp, resendOtp,
   verifyPhoneOtp, resendPhoneOtp,
   forgotPassword, verifyForgotOtp, resetPassword,
+  google,
 };

@@ -1,7 +1,25 @@
 'use strict';
 const router = require('express').Router();
+const multer = require('multer');
 const { authenticate, authorize } = require('../../middlewares/auth.middleware');
-const { getProfile, updateProfile, changePassword, deleteAccount } = require('../../controllers/shared/profile.controller');
+const { uploadJobDocs } = require('../../controllers/buyer/upload.controller');
+
+// Job attachment upload (PDF/DOC/DOCX/images, 10 MB each, up to 5)
+const docUpload = multer({
+  storage: multer.memoryStorage(),
+  limits:  { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = new Set([
+      'application/pdf', 'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'image/jpeg', 'image/jpg', 'image/png', 'image/webp',
+      'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'text/plain',
+    ]);
+    allowed.has(file.mimetype) ? cb(null, true) : cb(new Error('Unsupported file type'));
+  },
+});
+const { getProfile, updateProfile, changePassword, deleteAccount, getPreferences, updatePreferences } = require('../../controllers/shared/profile.controller');
 const { registerFcmToken, clearFcmToken } = require('../../controllers/shared/fcm.controller');
 const { listNotifications, getUnreadCount, markOneRead, markAllRead, deleteOne: deleteNotification } = require('../../controllers/shared/notification.controller');
 const {
@@ -22,6 +40,8 @@ router.get   ('/profile',         getProfile);
 router.put   ('/profile',         updateProfile);
 router.put   ('/change-password', changePassword);
 router.delete('/account',         deleteAccount);
+router.get   ('/preferences',     getPreferences);
+router.put   ('/preferences',     updatePreferences);
 router.put   ('/fcm-token',       registerFcmToken);
 router.delete('/fcm-token',       clearFcmToken);
 
@@ -62,6 +82,7 @@ router.patch ('/offers/:id/accept',  acceptOffer);
 router.patch ('/offers/:id/decline', declineOffer);
 
 // ── Jobs ───────────────────────────────────────────────────────────────
+router.post  ('/jobs/upload',   docUpload.array('files', 5), uploadJobDocs);
 router.get   ('/jobs',          listMyJobs);
 router.get   ('/jobs/:id',      getJob);
 router.post  ('/jobs',          createJob);

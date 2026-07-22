@@ -3,6 +3,7 @@ const { Job, User, Bid, SellerProfile, Booking } = require('../../models');
 const { Op, literal }    = require('sequelize');
 const notify             = require('../../helpers/notification.helper');
 const { applyConnects, BID_COST } = require('../../helpers/connects.helper');
+const { stripHtml }               = require('../../helpers/text.helper');
 
 const FEE_PERCENT = 0.10;
 
@@ -73,11 +74,11 @@ exports.browseJobs = async (req, res) => {
     });
     const bidMap = new Map(myBids.map(b => [b.job_id, b]));
 
-    const data = rows.map(j => ({
-      ...j.toJSON(),
-      has_bid: bidMap.has(j.id),
-      my_bid:  bidMap.get(j.id) || null,
-    }));
+    const data = rows.map(j => {
+      const obj = j.toJSON();
+      obj.description = stripHtml(obj.description);   // clean preview in list
+      return { ...obj, has_bid: bidMap.has(j.id), my_bid: bidMap.get(j.id) || null };
+    });
 
     return res.json({
       success: true,

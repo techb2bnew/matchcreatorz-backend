@@ -6,7 +6,7 @@ const multer = require('multer');
 const { listMyServices, getMyService, createService, updateService, deleteService, publishService, pauseService } = require('../../controllers/seller/service.controller');
 const { uploadResume } = require('../../controllers/seller/upload.controller');
 const { getSellerProfile, updateSellerProfile } = require('../../controllers/seller/profile.controller');
-const { changePassword, deleteAccount } = require('../../controllers/shared/profile.controller');
+const { changePassword, deleteAccount, getPreferences, updatePreferences } = require('../../controllers/shared/profile.controller');
 const { registerFcmToken, clearFcmToken } = require('../../controllers/shared/fcm.controller');
 const { listNotifications, getUnreadCount, markOneRead, markAllRead, deleteOne: deleteNotification } = require('../../controllers/shared/notification.controller');
 const { browseJobs, getJobDetail, placeBid, updateBid, withdrawBid, myBids, counterBidBySeller, acceptCounterBySeller } = require('../../controllers/seller/job.controller');
@@ -42,6 +42,8 @@ router.get   ('/profile',         getSellerProfile);
 router.put   ('/profile',         updateSellerProfile);
 router.put   ('/change-password', changePassword);
 router.delete('/account',         deleteAccount);
+router.get   ('/preferences',     getPreferences);
+router.put   ('/preferences',     updatePreferences);
 router.put   ('/fcm-token',       registerFcmToken);
 router.delete('/fcm-token',       clearFcmToken);
 

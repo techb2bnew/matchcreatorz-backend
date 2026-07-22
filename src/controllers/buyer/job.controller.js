@@ -1,7 +1,8 @@
 'use strict';
 const { Job, User, Bid, Booking } = require('../../models');
-const { Op }                      = require('sequelize');
+const { Op, literal }             = require('sequelize');
 const notify                      = require('../../helpers/notification.helper');
+const { stripHtml }               = require('../../helpers/text.helper');
 
 const FEE_PERCENT = 0.10;
 
@@ -25,6 +26,10 @@ const BUYER_ATTRS = ['id', 'name', 'email'];
  *         schema: { type: string, enum: [OPEN, IN_PROGRESS, CLOSED, CANCELLED] }
  *         description: Filter by job status
  *       - in: query
+ *         name: category
+ *         schema: { type: string }
+ *         description: Filter by category name (partial match)
+ *       - in: query
  *         name: page
  *         schema: { type: integer, default: 1 }
  *       - in: query
@@ -36,13 +41,21 @@ const BUYER_ATTRS = ['id', 'name', 'email'];
  */
 exports.listMyJobs = async (req, res) => {
   try {
-    const { status, search, page = 1, limit = 20 } = req.query;
+    const { status, search, category, page = 1, limit = 20 } = req.query;
     const where = { buyer_id: req.user.id };
     if (status) where.status = status;
+    if (category && category !== 'All') {
+      where.category = { [Op.iLike]: `%${String(category).trim()}%` };
+    }
     if (search && search.trim()) {
+      const term = search.trim();
+      const safe = term.replace(/'/g, "''");
       where[Op.or] = [
-        { title:       { [Op.iLike]: `%${search.trim()}%` } },
-        { description: { [Op.iLike]: `%${search.trim()}%` } },
+        { title:       { [Op.iLike]: `%${term}%` } },
+        { description: { [Op.iLike]: `%${term}%` } },
+        { category:    { [Op.iLike]: `%${term}%` } },
+        // searchable skills (JSON array) — cast to text and match
+        literal(`CAST("Job"."skills" AS TEXT) ILIKE '%${safe}%'`),
       ];
     }
 
@@ -54,9 +67,16 @@ exports.listMyJobs = async (req, res) => {
       offset,
     });
 
+    // Return clean plain-text description in the list (detail keeps full HTML)
+    const data = rows.map((r) => {
+      const j = r.toJSON();
+      j.description = stripHtml(j.description);
+      return j;
+    });
+
     return res.json({
       success: true,
-      data: rows,
+      data,
       pagination: { total: count, page: Number(page), limit: Number(limit), pages: Math.ceil(count / Number(limit)) },
     });
   } catch (err) {
@@ -126,7 +146,7 @@ exports.getJob = async (req, res) => {
  */
 exports.createJob = async (req, res) => {
   try {
-    const { title, description, category, job_type, budget_min, budget_max, deadline, skills, experience_level } = req.body;
+    const { title, description, category, job_type, budget_min, budget_max, deadline, skills, experience_level, attachments } = req.body;
     if (!title || !title.trim()) return res.status(400).json({ success: false, message: 'Title is required' });
 
     const skillsArr = Array.isArray(skills)
@@ -146,6 +166,7 @@ exports.createJob = async (req, res) => {
       deadline: deadline || null,
       skills: skillsArr,
       experience_level: experience_level || 'any',
+      attachments: Array.isArray(attachments) ? attachments : [],
       status: 'OPEN',
     });
 
@@ -194,7 +215,7 @@ exports.updateJob = async (req, res) => {
     if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
     if (job.status !== 'OPEN') return res.status(400).json({ success: false, message: 'Only OPEN jobs can be edited' });
 
-    const { title, description, category, job_type, budget_min, budget_max, deadline, skills, experience_level } = req.body;
+    const { title, description, category, job_type, budget_min, budget_max, deadline, skills, experience_level, attachments } = req.body;
 
     const skillsArr = Array.isArray(skills)
       ? skills
@@ -212,6 +233,7 @@ exports.updateJob = async (req, res) => {
       deadline:         deadline         ?? job.deadline,
       skills:           skillsArr,
       experience_level: experience_level ?? job.experience_level,
+      attachments:      Array.isArray(attachments) ? attachments : job.attachments,
     });
 
     return res.json({ success: true, message: 'Job updated', data: job });

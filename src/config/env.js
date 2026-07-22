@@ -1,5 +1,7 @@
 'use strict';
-require('dotenv').config();
+// override:true so values in .env always win over any stale/empty vars
+// left in the process environment (e.g. cached by pm2).
+require('dotenv').config({ override: true });
 
 const env = {
   NODE_ENV: process.env.NODE_ENV || 'development',
@@ -12,6 +14,9 @@ const env = {
   DB_USER:     process.env.DB_USER     || 'postgres',
   DB_PASSWORD: process.env.DB_PASSWORD || '',
   DB_SSL:      process.env.DB_SSL === 'true',
+
+  // Google OAuth (Sign in with Google)
+  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || '',
 
   // JWT
   JWT_SECRET:         process.env.JWT_SECRET         || 'change_this_secret_in_production',

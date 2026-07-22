@@ -7,6 +7,10 @@ const { sendOtp }    = require('../../helpers/email.helper');
 const { sendSmsOtp } = require('../../helpers/sms.helper');
 const notify         = require('../../helpers/notification.helper');
 
+const { OAuth2Client } = require('google-auth-library');
+const crypto           = require('crypto');
+const googleClient     = new OAuth2Client(env.GOOGLE_CLIENT_ID);
+
 const generateOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 
 const signToken = (payload) =>
@@ -344,9 +348,102 @@ const resetPassword = async ({ token, password }) => {
   return true;
 };
 
+// ── Google sign-in ────────────────────────────────────────────────────
+// Flow:
+//  1. Frontend gets a Google ID-token (credential) and posts it here.
+//  2. We verify it against GOOGLE_CLIENT_ID.
+//  3. Existing user → normal login (returns token).
+//     New user WITHOUT role → { isNew:true, profile } so the UI can ask role.
+//     New user WITH role → create account. BUYER logs in immediately;
+//     SELLER is created pending admin approval (no token yet).
+const googleAuth = async ({ credential, role }) => {
+  if (!env.GOOGLE_CLIENT_ID)
+    throw { statusCode: 500, message: 'Google login is not configured on the server' };
+  if (!credential)
+    throw { statusCode: 400, message: 'Google credential is required' };
+
+  // 1. Verify the ID token
+  let payload;
+  try {
+    const ticket = await googleClient.verifyIdToken({ idToken: credential, audience: env.GOOGLE_CLIENT_ID });
+    payload = ticket.getPayload();
+  } catch {
+    throw { statusCode: 401, message: 'Invalid or expired Google token' };
+  }
+  if (!payload?.email) throw { statusCode: 400, message: 'Google account has no email' };
+
+  const email   = payload.email.toLowerCase();
+  const name    = payload.name || email.split('@')[0];
+  const avatar  = payload.picture || null;
+
+  // 2. Existing user?
+  let user = await User.findOne({ where: { email }, paranoid: false });
+
+  if (user) {
+    if (user.deletedAt || user.deleted_at)
+      throw { statusCode: 403, message: 'This account has been deleted.' };
+    if (user.status === 'banned')   throw { statusCode: 403, message: 'Account is banned' };
+    if (user.status === 'inactive') throw { statusCode: 403, message: 'Account is inactive' };
+
+    if (user.role === 'SELLER') {
+      const profile = await SellerProfile.findOne({ where: { user_id: user.id } });
+      if (profile && profile.approval_status === 'rejected')
+        throw { statusCode: 403, message: 'Your seller account has been rejected by admin' };
+      if (profile && profile.approval_status === 'pending')
+        throw { statusCode: 403, message: 'Your seller account is pending admin approval' };
+    }
+
+    const token = signToken({ id: user.id, email: user.email, role: user.role });
+    return {
+      token, role: user.role,
+      user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role, is_verified: user.is_verified },
+    };
+  }
+
+  // 3. New user — need a role
+  if (!role) {
+    return { isNew: true, profile: { email, name, avatar } };
+  }
+  const chosen = String(role).toUpperCase();
+  if (!['BUYER', 'SELLER'].includes(chosen))
+    throw { statusCode: 400, message: 'role must be BUYER or SELLER' };
+
+  // Google users have no password — set a strong random one
+  const randomPw = await bcrypt.hash(crypto.randomBytes(24).toString('hex'), 12);
+
+  user = await User.create({
+    name,
+    email,
+    password:    randomPw,
+    role:        chosen,
+    status:      'active',
+    is_verified: true,            // email already verified by Google
+    avatar,
+  });
+
+  if (chosen === 'SELLER') {
+    await SellerProfile.create({ user_id: user.id, approval_status: 'pending' });
+    // Pending approval → no token yet (consistent with normal seller signup)
+    return {
+      isNew: false,
+      pendingApproval: true,
+      message: 'Seller account created. It is pending admin approval before you can sign in.',
+    };
+  }
+
+  // BUYER → create profile + log in immediately
+  await BuyerProfile.create({ user_id: user.id }).catch(() => {});
+  const token = signToken({ id: user.id, email: user.email, role: user.role });
+  return {
+    token, role: user.role,
+    user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role, is_verified: user.is_verified },
+  };
+};
+
 module.exports = {
   register, login, logout,
   verifyOtp, resendOtp,
   verifyPhoneOtp, resendPhoneOtp,
   forgotPasswordByPhone, verifyForgotPhoneOtp, resetPassword,
+  googleAuth,
 };

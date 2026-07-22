@@ -113,6 +113,13 @@ const User = sequelize.define('User', {
     allowNull: true,
   },
 
+  // Per-user settings (notification prefs, privacy toggles, payout prefs)
+  preferences: {
+    type:         DataTypes.JSONB,
+    allowNull:    true,
+    defaultValue: {},
+  },
+
 }, {
   tableName:  'users',
   timestamps: true,
