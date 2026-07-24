@@ -90,9 +90,18 @@ CREATE TABLE IF NOT EXISTS "offers" ("id"  SERIAL , "seller_id" INTEGER NOT NULL
 -- AppSetting
 CREATE TABLE IF NOT EXISTS "app_settings" ("id"  SERIAL , "key" VARCHAR(100) NOT NULL UNIQUE, "value" JSONB DEFAULT '{}', "created_at" TIMESTAMP WITH TIME ZONE NOT NULL, "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL, PRIMARY KEY ("id"));
 
+-- Conversation
+CREATE TABLE IF NOT EXISTS "conversations" ("id"  SERIAL , "user_one_id" INTEGER NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE, "user_two_id" INTEGER NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE, "last_message" TEXT, "last_message_at" TIMESTAMP WITH TIME ZONE, "last_sender_id" INTEGER REFERENCES "users" ("id") ON DELETE SET NULL ON UPDATE CASCADE, "unread_one" INTEGER NOT NULL DEFAULT 0, "unread_two" INTEGER NOT NULL DEFAULT 0, "archived_one" BOOLEAN NOT NULL DEFAULT false, "archived_two" BOOLEAN NOT NULL DEFAULT false, "created_at" TIMESTAMP WITH TIME ZONE NOT NULL, "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL, PRIMARY KEY ("id"));
+
+-- Message
+CREATE TABLE IF NOT EXISTS "messages" ("id"  SERIAL , "conversation_id" INTEGER NOT NULL REFERENCES "conversations" ("id") ON DELETE CASCADE ON UPDATE CASCADE, "sender_id" INTEGER NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE, "body" TEXT NOT NULL, "attachment" JSONB DEFAULT NULL, "is_read" BOOLEAN NOT NULL DEFAULT false, "read_at" TIMESTAMP WITH TIME ZONE, "created_at" TIMESTAMP WITH TIME ZONE NOT NULL, "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL, PRIMARY KEY ("id"));
+
 -- ---------- INDEXES ----------
 CREATE UNIQUE INDEX IF NOT EXISTS "favourites_user_id_service_id" ON "favourites" ("user_id", "service_id");
 CREATE UNIQUE INDEX IF NOT EXISTS "app_settings_key" ON "app_settings" ("key");
+CREATE UNIQUE INDEX IF NOT EXISTS "conversations_user_one_id_user_two_id" ON "conversations" ("user_one_id","user_two_id");
+CREATE INDEX IF NOT EXISTS "conversations_last_message_at" ON "conversations" ("last_message_at");
+CREATE INDEX IF NOT EXISTS "messages_conversation_id_created_at" ON "messages" ("conversation_id","created_at");
 CREATE INDEX IF NOT EXISTS "services_seller_id ON "services" ("seller_id")";
 CREATE INDEX IF NOT EXISTS "services_category_id ON "services" ("category_id")";
 CREATE INDEX IF NOT EXISTS "services_status ON "services" ("status")";
@@ -105,11 +114,12 @@ CREATE INDEX IF NOT EXISTS "notifications_user_id ON "notifications" ("user_id")
 CREATE INDEX IF NOT EXISTS "offers_buyer_id ON "offers" ("buyer_id")";
 CREATE INDEX IF NOT EXISTS "offers_seller_id ON "offers" ("seller_id")";
 CREATE INDEX IF NOT EXISTS "connect_transactions_seller_id ON "connect_transactions" ("seller_id")";
+CREATE INDEX IF NOT EXISTS "messages_sender_id ON "messages" ("sender_id")";
 
 -- ---------- SEED DATA ----------
 -- Default admin (email: admin@matchcreatorz.com  password: Admin@123)
 INSERT INTO "users" ("name","email","password","role","status","is_verified","created_at","updated_at")
-VALUES ('Super Admin','admin@matchcreatorz.com','$2a$12$idm205bHbz0zD8TFNCDaQumMuweyuKZeAkm/NNz6bFglFXZd0cnve','ADMIN','active',true,NOW(),NOW())
+VALUES ('Super Admin','admin@matchcreatorz.com','$2a$12$.EsHxmIzbwZVT0cXRXDcquT0CgjVIWUZW8cZM59gwGSDrBe4NFOvq','ADMIN','active',true,NOW(),NOW())
 ON CONFLICT ("email") DO NOTHING;
 
 -- Starter categories

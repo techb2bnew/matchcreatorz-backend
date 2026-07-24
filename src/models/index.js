@@ -14,6 +14,8 @@ const Favourite     = require('./favourite.model');
 const ConnectTransaction = require('./connectTransaction.model');
 const Offer         = require('./offer.model');
 const AppSetting    = require('./appSetting.model');
+const Conversation  = require('./conversation.model');
+const Message       = require('./message.model');
 
 // ── Associations ──────────────────────────────────────────
 
@@ -93,6 +95,15 @@ Offer.belongsTo(User, { foreignKey: 'buyer_id',  as: 'buyer' });
 Offer.belongsTo(Service, { foreignKey: 'service_id', as: 'service' });
 Offer.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
 
+// Chat: Conversation ↔ Users (two participants) + Messages
+Conversation.belongsTo(User, { foreignKey: 'user_one_id', as: 'userOne' });
+Conversation.belongsTo(User, { foreignKey: 'user_two_id', as: 'userTwo' });
+Conversation.belongsTo(User, { foreignKey: 'last_sender_id', as: 'lastSender' });
+
+Conversation.hasMany(Message, { foreignKey: 'conversation_id', as: 'messages', onDelete: 'CASCADE' });
+Message.belongsTo(Conversation, { foreignKey: 'conversation_id', as: 'conversation' });
+Message.belongsTo(User, { foreignKey: 'sender_id', as: 'sender' });
+
 // ─────────────────────────────────────────────────────────
 
 const db = {
@@ -111,6 +122,8 @@ const db = {
   ConnectTransaction,
   Offer,
   AppSetting,
+  Conversation,
+  Message,
 };
 
 module.exports = db;

@@ -1,8 +1,10 @@
 'use strict';
 require('dotenv').config();
+const http      = require('http');
 const app       = require('./src/app');
 const env       = require('./src/config/env');
 const { sequelize } = require('./src/models/index');  // loads all models
+const { initSocket } = require('./src/socket');
 
 const startServer = async () => {
   try {
@@ -16,8 +18,10 @@ const startServer = async () => {
     await sequelize.sync({ alter: true });
     console.log('✅  Models synced');
 
-    // 3. Start HTTP server
-    const server = app.listen(env.PORT, () => {
+    // 3. Start HTTP server (wrapped so Socket.IO can attach)
+    const server = http.createServer(app);
+    initSocket(server);   // real-time chat
+    server.listen(env.PORT, () => {
       console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log(`🚀  MatchCreatorz API running`);
       console.log(`    Mode : ${env.NODE_ENV}`);

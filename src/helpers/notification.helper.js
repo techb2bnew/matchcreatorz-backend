@@ -264,6 +264,24 @@ const offerReceived = (buyer, sellerName, offer) => notifyUser(buyer, {
   data: { type: 'offer_received', offer_id: String(offer.id) },
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CHAT  (category: chatAlert — respects the "Chat Messages" setting; no email)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const chatMessage = async (recipientId, senderName, message) => {
+  const user = await ff(User.findByPk(recipientId, {
+    attributes: ['id', 'name', 'web_fcm_token', 'mobile_fcm_token', 'preferences'],
+  }));
+  if (!user) return;
+  return notifyUser(user, {
+    type:  'chat_message',
+    title: `New message from ${senderName || 'Someone'}`,
+    body:  String(message.body || '').slice(0, 140),
+    data:  { type: 'chat_message', conversation_id: String(message.conversation_id) },
+    // no email for chat pings — push + in-app inbox only
+  });
+};
+
 module.exports = {
   // auth
   welcome,
@@ -295,4 +313,6 @@ module.exports = {
   connectsAdded,
   // offers
   offerReceived,
+  // chat
+  chatMessage,
 };
