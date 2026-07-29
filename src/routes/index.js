@@ -6,6 +6,8 @@ router.use('/admin',      require('./admin'));
 router.use('/seller',     require('./seller'));
 router.use('/buyer',      require('./buyer'));
 router.use('/chat',       require('./chat'));
+router.use('/support',    require('./support'));
+router.use('/wallet',     require('./wallet'));
 router.use('/categories', require('./categories'));
 
 module.exports = router;

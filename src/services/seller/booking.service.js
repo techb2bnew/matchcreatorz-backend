@@ -1,7 +1,8 @@
 'use strict';
 const { Op }                          = require('sequelize');
-const { Booking, User, Service, Job } = require('../../models');
+const { sequelize, Booking, User, Service, Job } = require('../../models');
 const notify                          = require('../../helpers/notification.helper');
+const wallet                          = require('../wallet/wallet.service');
 
 const INCLUDE = [
   { model: User,    as: 'buyer',   attributes: ['id', 'name'] },
@@ -54,11 +55,11 @@ exports.acceptOrder = async (sellerId, id) => {
 exports.submitWork = async (sellerId, id) => {
   const booking = await Booking.findOne({ where: { id, seller_id: sellerId } });
   if (!booking) throw Object.assign(new Error('Booking not found'), { status: 404 });
-  if (booking.status !== 'ongoing')
-    throw Object.assign(new Error('Booking must be ongoing to submit work'), { status: 400 });
+  if (!['ongoing', 'in_dispute'].includes(booking.status))
+    throw Object.assign(new Error('Booking must be ongoing or in dispute to submit work'), { status: 400 });
 
   await booking.update({ status: 'amidst_completion' });
-  // Notify buyer that work has been submitted
+  // Notify buyer that work has been (re)submitted for review
   const buyer = await User.findByPk(booking.buyer_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
   if (buyer) notify.workSubmitted(buyer, booking);
   return booking;
@@ -70,7 +71,22 @@ exports.cancelBooking = async (sellerId, id, cancel_reason) => {
   if (booking.status !== 'pending')
     throw Object.assign(new Error('Only pending bookings can be cancelled by seller'), { status: 400 });
 
-  await booking.update({ status: 'cancelled', cancel_reason: cancel_reason || null });
+  // Refund the held escrow back to the buyer.
+  await sequelize.transaction(async (t) => {
+    const wasHeld = booking.payment_status === 'held';
+    await booking.update({
+      status: 'cancelled',
+      cancel_reason: cancel_reason || null,
+      payment_status: wasHeld ? 'refunded' : booking.payment_status,
+    }, { transaction: t });
+    if (wasHeld) {
+      await wallet.credit(booking.buyer_id, Number(booking.amount), {
+        type: 'booking_refund', booking_id: booking.id,
+        note: `Refund for booking #${booking.id} cancelled by seller`,
+      }, t);
+    }
+  });
+
   // Notify buyer that seller cancelled
   const buyer = await User.findByPk(booking.buyer_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
   if (buyer) notify.bookingCancelledBySeller(buyer, booking);

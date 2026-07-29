@@ -1,6 +1,7 @@
 'use strict';
 const { Op }                            = require('sequelize');
-const { Booking, User, Service, Job }   = require('../../models');
+const { sequelize, Booking, User, Service, Job } = require('../../models');
+const wallet                            = require('../../services/wallet/wallet.service');
 
 const INCLUDE = [
   { model: User,    as: 'buyer',   attributes: ['id', 'name', 'email'] },
@@ -136,7 +137,33 @@ exports.resolveDispute = async (req, res) => {
     if (!['completed', 'cancelled'].includes(resolution))
       return res.status(400).json({ success: false, message: 'Resolution must be completed or cancelled' });
 
-    await booking.update({ status: resolution });
+    // Settle escrow according to the resolution.
+    await sequelize.transaction(async (t) => {
+      const wasHeld = booking.payment_status === 'held';
+      if (resolution === 'completed') {
+        // Favour seller → release earnings (amount − fee); platform keeps the fee.
+        await booking.update({ status: 'completed', payment_status: wasHeld ? 'released' : booking.payment_status }, { transaction: t });
+        if (wasHeld) {
+          const amount = Number(booking.amount);
+          const fee    = Number(booking.platform_fee);
+          await wallet.credit(booking.seller_id, wallet.round2(amount - fee), {
+            type: 'earning', booking_id: booking.id, note: `Earning from resolved booking #${booking.id}`,
+          }, t);
+          const admin = await User.findOne({ where: { role: 'ADMIN' }, order: [['id', 'ASC']], attributes: ['id'], transaction: t });
+          if (admin && fee > 0) {
+            await wallet.credit(admin.id, fee, { type: 'platform_fee', booking_id: booking.id, note: `Platform fee from booking #${booking.id}` }, t);
+          }
+        }
+      } else {
+        // Favour buyer → refund the held escrow.
+        await booking.update({ status: 'cancelled', payment_status: wasHeld ? 'refunded' : booking.payment_status }, { transaction: t });
+        if (wasHeld) {
+          await wallet.credit(booking.buyer_id, Number(booking.amount), {
+            type: 'booking_refund', booking_id: booking.id, note: `Refund for disputed booking #${booking.id}`,
+          }, t);
+        }
+      }
+    });
     return res.json({ success: true, message: `Dispute resolved as ${resolution}`, data: booking });
   } catch (err) {
     console.error('resolveDispute:', err);

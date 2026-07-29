@@ -13,7 +13,7 @@ const { browseJobs, getJobDetail, placeBid, updateBid, withdrawBid, myBids, coun
 const { listBookings: listSellerBookings, getBooking: getSellerBooking, acceptOrder, submitWork, cancelBooking: cancelSellerBooking } = require('../../controllers/seller/booking.controller');
 const { listReviews: listSellerReviews } = require('../../controllers/seller/review.controller');
 const { getStats: getSellerStats }       = require('../../controllers/seller/stats.controller');
-const { getBalance: getConnectsBalance, getHistory: getConnectsHistory } = require('../../controllers/seller/connect.controller');
+const { getBalance: getConnectsBalance, getHistory: getConnectsHistory, getPlans: getConnectsPlans, purchasePlan: purchaseConnects, confirmPurchase: confirmConnectsPurchase } = require('../../controllers/seller/connect.controller');
 const { sendOffer, listSentOffers, withdrawOffer } = require('../../controllers/shared/offer.controller');
 const { searchBuyers } = require('../../controllers/seller/buyer.controller');
 
@@ -88,8 +88,11 @@ router.get('/stats', getSellerStats);
 router.get('/reviews', listSellerReviews);
 
 // ── Connects ───────────────────────────────────────────────────────────
-router.get('/connects/balance', getConnectsBalance);
-router.get('/connects/history', getConnectsHistory);
+router.get ('/connects/balance',          getConnectsBalance);
+router.get ('/connects/history',          getConnectsHistory);
+router.get ('/connects/plans',            getConnectsPlans);
+router.post('/connects/purchase',         purchaseConnects);
+router.get ('/connects/purchase/confirm', confirmConnectsPurchase);
 
 // ── Buyer lookup (for offer picker) ────────────────────────────────────
 router.get   ('/buyers',     searchBuyers);

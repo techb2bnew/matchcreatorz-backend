@@ -44,6 +44,9 @@ const initSocket = (server) => {
     // Join personal room → every device of this user gets the same events
     socket.join(emitter.userRoom(uid));
 
+    // Admins additionally join a shared room so the support queue updates live
+    if (socket.user.role === 'ADMIN') socket.join(emitter.ADMIN_ROOM);
+
     // Presence: mark online on first socket
     if (!online.has(uid)) { online.set(uid, new Set()); emitter.emitPresence(uid, true); }
     online.get(uid).add(socket.id);

@@ -80,7 +80,7 @@ exports.acceptOrder = async (req, res, next) => {
  * @swagger
  * /api/v1/seller/bookings/{id}/submit:
  *   patch:
- *     summary: Submit work for review (ongoing -> amidst_completion)
+ *     summary: Submit work for review (ongoing|in_dispute -> amidst_completion)
  *     tags: [Seller - Bookings]
  *     security: [{ bearerAuth: [] }]
  *     parameters:

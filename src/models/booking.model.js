@@ -53,6 +53,17 @@ const Booking = sequelize.define('Booking', {
     defaultValue: 'pending',
   },
 
+  // Escrow lifecycle for the wallet:
+  //   unpaid   → buyer wallet not yet charged
+  //   held     → amount debited from buyer & held in escrow
+  //   released → paid out to seller wallet (on completion)
+  //   refunded → returned to buyer (on cancel / dispute refund)
+  payment_status: {
+    type:         DataTypes.ENUM('unpaid', 'held', 'released', 'refunded'),
+    allowNull:    false,
+    defaultValue: 'unpaid',
+  },
+
   notes: {
     type:      DataTypes.TEXT,
     allowNull: true,

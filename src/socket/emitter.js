@@ -51,4 +51,41 @@ const emitPresence = (userId, online) => {
   io.emit('presence', { userId: Number(userId), online: !!online });
 };
 
-module.exports = { setIO, getIO, userRoom, emitNewMessage, emitRead, emitTyping, emitPresence };
+// ── Support tickets ───────────────────────────────────────────────────────────
+// All admins live in the 'admins' room so queue changes fan out to every admin.
+const ADMIN_ROOM = 'admins';
+
+// New support message → the requester's room, the assigned admin's room (if any),
+// and — when still unassigned — the whole admins room so the queue lights up.
+const emitSupportMessage = ({ message, ticket, senderId, recipientId }) => {
+  if (!io) return;
+  const payload = { ticketId: ticket.id, message };
+  io.to(userRoom(senderId)).emit('supportMessage', payload);
+  if (recipientId) io.to(userRoom(recipientId)).emit('supportMessage', payload);
+  if (!ticket.assigned_admin_id) io.to(ADMIN_ROOM).emit('supportMessage', payload);
+
+  emitSupportTicketUpdate(ticket);
+};
+
+// Ticket meta changed (new message preview, assignment, status). Fan out to the
+// requester, the assigned admin, and the admins room (queue view).
+const emitSupportTicketUpdate = (ticket) => {
+  if (!io) return;
+  const hint = {
+    ticketId:          ticket.id,
+    status:            ticket.status,
+    assigned_admin_id: ticket.assigned_admin_id,
+    last_message:      ticket.last_message,
+    last_message_at:   ticket.last_message_at,
+    last_sender_id:    ticket.last_sender_id,
+  };
+  io.to(userRoom(ticket.user_id)).emit('supportTicketUpdated', hint);
+  if (ticket.assigned_admin_id) io.to(userRoom(ticket.assigned_admin_id)).emit('supportTicketUpdated', hint);
+  io.to(ADMIN_ROOM).emit('supportTicketUpdated', hint);
+};
+
+module.exports = {
+  setIO, getIO, userRoom, ADMIN_ROOM,
+  emitNewMessage, emitRead, emitTyping, emitPresence,
+  emitSupportMessage, emitSupportTicketUpdate,
+};

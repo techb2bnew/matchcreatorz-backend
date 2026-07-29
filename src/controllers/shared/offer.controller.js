@@ -1,7 +1,8 @@
 'use strict';
-const { Offer, Booking, Service, User } = require('../../models');
+const { sequelize, Offer, Booking, Service, User } = require('../../models');
 const response = require('../../helpers/response.helper');
 const notify   = require('../../helpers/notification.helper');
+const wallet   = require('../../services/wallet/wallet.service');
 
 const FEE_PERCENT = 0.10;
 
@@ -217,18 +218,30 @@ exports.acceptOffer = async (req, res, next) => {
     const amount = Number(offer.amount);
     const fee    = Math.round(amount * FEE_PERCENT * 100) / 100;
 
-    const booking = await Booking.create({
-      buyer_id:      offer.buyer_id,
-      seller_id:     offer.seller_id,
-      service_id:    offer.service_id || null,
-      title:         offer.title,
-      amount,
-      platform_fee:  fee,
-      delivery_days: offer.delivery_days || null,
-      status:        'pending',
-    });
+    // Escrow: hold the offer amount from the buyer's wallet in the same
+    // transaction as booking creation (mirrors direct service bookings).
+    const booking = await sequelize.transaction(async (t) => {
+      const b = await Booking.create({
+        buyer_id:      offer.buyer_id,
+        seller_id:     offer.seller_id,
+        service_id:    offer.service_id || null,
+        title:         offer.title,
+        amount,
+        platform_fee:  fee,
+        delivery_days: offer.delivery_days || null,
+        status:        'pending',
+        payment_status: 'held',
+      }, { transaction: t });
 
-    await offer.update({ status: 'accepted', booking_id: booking.id });
+      await wallet.debit(offer.buyer_id, amount, {
+        type: 'booking_payment', booking_id: b.id,
+        note: `Payment held for booking #${b.id} — ${offer.title}`,
+      }, t);
+
+      await offer.update({ status: 'accepted', booking_id: b.id }, { transaction: t });
+
+      return b;
+    });
 
     // notify seller
     const seller = await User.findByPk(offer.seller_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });

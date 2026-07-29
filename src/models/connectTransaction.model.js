@@ -26,8 +26,9 @@ const ConnectTransaction = sequelize.define('ConnectTransaction', {
     defaultValue: 'admin_credit',
   },
 
-  note:   { type: DataTypes.STRING(255), allowNull: true },
-  ref_id: { type: DataTypes.INTEGER,     allowNull: true }, // e.g. related job/bid id
+  note:       { type: DataTypes.STRING(255), allowNull: true },
+  ref_id:     { type: DataTypes.INTEGER,     allowNull: true }, // e.g. related job/bid id
+  stripe_ref: { type: DataTypes.STRING,      allowNull: true }, // Stripe checkout session id (purchase idempotency)
 
 }, {
   tableName:  'connect_transactions',

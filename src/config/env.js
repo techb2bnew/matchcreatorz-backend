@@ -18,6 +18,10 @@ const env = {
   // Google OAuth (Sign in with Google)
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || '',
 
+  // Apple OAuth (Sign in with Apple) — comma-separated list of accepted
+  // token audiences (Services ID for web, Bundle ID(s) for iOS apps).
+  APPLE_CLIENT_ID: process.env.APPLE_CLIENT_ID || '',
+
   // JWT
   JWT_SECRET:         process.env.JWT_SECRET         || 'change_this_secret_in_production',
   JWT_EXPIRES_IN:     process.env.JWT_EXPIRES_IN     || '7d',
@@ -57,6 +61,16 @@ const env = {
   VAPID_PUBLIC_KEY:  process.env.VAPID_PUBLIC_KEY  || '',
   VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY || '',
   VAPID_EMAIL:       process.env.VAPID_EMAIL       || '',
+
+  // Stripe (wallet top-ups via Checkout + Connect payouts to sellers)
+  STRIPE_SECRET_KEY:      process.env.STRIPE_SECRET_KEY      || '',
+  STRIPE_PUBLISHABLE_KEY: process.env.STRIPE_PUBLISHABLE_KEY || '',
+  STRIPE_WEBHOOK_SECRET:  process.env.STRIPE_WEBHOOK_SECRET  || '',
+
+  // Wallet business rules
+  PLATFORM_FEE_PERCENT: parseFloat(process.env.PLATFORM_FEE_PERCENT || '10'), // % taken by platform on completed bookings
+  MIN_WITHDRAW:         parseFloat(process.env.MIN_WITHDRAW || '50'),         // minimum seller withdrawal
+  WALLET_CURRENCY:      (process.env.WALLET_CURRENCY || 'usd').toLowerCase(),
 };
 
 // Validate critical vars in production

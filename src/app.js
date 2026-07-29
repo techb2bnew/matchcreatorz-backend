@@ -55,6 +55,15 @@ app.use('/api', rateLimit({
   message:  { success: false, message: 'Too many requests.' },
 }));
 
+// ── Stripe webhook (RAW body) ─────────────────────────────────
+// Must be registered BEFORE express.json so signature verification sees the
+// unparsed body.
+app.post(
+  '/api/v1/wallet/webhook',
+  express.raw({ type: 'application/json' }),
+  require('./controllers/wallet/wallet.controller').webhook
+);
+
 // ── Body parsing ──────────────────────────────────────────────
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));

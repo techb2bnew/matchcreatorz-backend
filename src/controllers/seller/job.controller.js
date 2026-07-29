@@ -1,9 +1,10 @@
 'use strict';
-const { Job, User, Bid, SellerProfile, Booking } = require('../../models');
+const { sequelize, Job, User, Bid, SellerProfile, Booking, ConnectTransaction } = require('../../models');
 const { Op, literal }    = require('sequelize');
 const notify             = require('../../helpers/notification.helper');
-const { applyConnects, BID_COST } = require('../../helpers/connects.helper');
+const { applyConnects, getBidCost } = require('../../helpers/connects.helper');
 const { stripHtml }               = require('../../helpers/text.helper');
+const wallet             = require('../../services/wallet/wallet.service');
 
 const FEE_PERCENT = 0.10;
 
@@ -117,13 +118,17 @@ exports.browseJobs = async (req, res) => {
  */
 exports.getJobDetail = async (req, res) => {
   try {
+    const myBid = await Bid.findOne({ where: { job_id: req.params.id, seller_id: req.user.id } });
+
+    // A job the seller has never bid on is only viewable while it's OPEN (browsing).
+    // A job they DID bid on stays viewable regardless of status, so they can see
+    // what happened to their bid (accepted/rejected/booked/closed).
+    const where = myBid ? { id: req.params.id } : { id: req.params.id, status: 'OPEN' };
     const job = await Job.findOne({
-      where:   { id: req.params.id, status: 'OPEN' },
+      where,
       include: [{ model: User, as: 'buyer', attributes: ['id', 'name', 'email'] }],
     });
     if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
-
-    const myBid = await Bid.findOne({ where: { job_id: job.id, seller_id: req.user.id } });
 
     return res.json({ success: true, data: { ...job.toJSON(), has_bid: !!myBid, my_bid: myBid || null } });
   } catch (err) {
@@ -175,11 +180,12 @@ exports.placeBid = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Amount and delivery days are required' });
 
     // Connects gate: seller must have enough connects to bid
+    const bidCost = await getBidCost();
     const profile = await SellerProfile.findOne({ where: { user_id: req.user.id }, attributes: ['connects_balance'] });
-    if (!profile || Number(profile.connects_balance) < BID_COST) {
+    if (!profile || Number(profile.connects_balance) < bidCost) {
       return res.status(400).json({
         success: false,
-        message: `You need at least ${BID_COST} connect(s) to place a bid. Please top up.`,
+        message: `You need at least ${bidCost} connect(s) to place a bid. Please top up.`,
       });
     }
 
@@ -193,7 +199,7 @@ exports.placeBid = async (req, res) => {
     });
 
     // Deduct connects (ledger + balance) — ref the job
-    await applyConnects(req.user.id, -BID_COST, 'bid_deduct', {
+    await applyConnects(req.user.id, -bidCost, 'bid_deduct', {
       note:   `Bid on job #${job.id}`,
       ref_id: job.id,
     }).catch(() => {});
@@ -299,8 +305,16 @@ exports.withdrawBid = async (req, res) => {
     await bid.destroy();
     if (job.bids_count > 0) await job.decrement('bids_count');
 
-    // Refund the connect spent on this bid
-    await applyConnects(req.user.id, BID_COST, 'refund', {
+    // Refund exactly what was deducted for this bid (connects_per_bid may have
+    // changed since the bid was placed) — fall back to the current cost if the
+    // original deduction can't be found.
+    const spent = await ConnectTransaction.findOne({
+      where: { seller_id: req.user.id, ref_id: job.id, type: 'bid_deduct' },
+      order: [['created_at', 'DESC']],
+    });
+    const refundAmount = spent ? Math.abs(Number(spent.amount)) : await getBidCost();
+
+    await applyConnects(req.user.id, refundAmount, 'refund', {
       note:   `Refund: withdrew bid on job #${job.id}`,
       ref_id: job.id,
     }).catch(() => {});
@@ -415,20 +429,33 @@ exports.acceptCounterBySeller = async (req, res) => {
     const effDelivery = bid.counter_delivery_days != null ? bid.counter_delivery_days : bid.delivery_days;
     const fee = Math.round(effAmount * FEE_PERCENT * 100) / 100;
 
-    await bid.update({ status: 'accepted' });
-    await Bid.update({ status: 'rejected' }, { where: { job_id: job.id, id: { [Op.ne]: bid.id } } });
-    await job.update({ status: 'IN_PROGRESS' });
+    // Escrow: hold the agreed amount from the buyer's wallet in the same
+    // transaction as the bid/job/booking updates (mirrors direct service
+    // bookings). If the buyer lacks funds, everything rolls back.
+    const booking = await sequelize.transaction(async (t) => {
+      await bid.update({ status: 'accepted' }, { transaction: t });
+      await Bid.update({ status: 'rejected' }, { where: { job_id: job.id, id: { [Op.ne]: bid.id } }, transaction: t });
+      await job.update({ status: 'IN_PROGRESS' }, { transaction: t });
 
-    const booking = await Booking.create({
-      buyer_id:      job.buyer_id,
-      seller_id:     req.user.id,
-      job_id:        job.id,
-      service_id:    null,
-      title:         job.title,
-      amount:        effAmount,
-      platform_fee:  fee,
-      delivery_days: effDelivery,
-      status:        'pending',
+      const b = await Booking.create({
+        buyer_id:      job.buyer_id,
+        seller_id:     req.user.id,
+        job_id:        job.id,
+        service_id:    null,
+        title:         job.title,
+        amount:        effAmount,
+        platform_fee:  fee,
+        delivery_days: effDelivery,
+        status:        'pending',
+        payment_status: 'held',
+      }, { transaction: t });
+
+      await wallet.debit(job.buyer_id, effAmount, {
+        type: 'booking_payment', booking_id: b.id,
+        note: `Payment held for booking #${b.id} — ${job.title}`,
+      }, t);
+
+      return b;
     });
 
     // Notify buyer their counter was accepted (booking created)
@@ -437,6 +464,8 @@ exports.acceptCounterBySeller = async (req, res) => {
 
     return res.json({ success: true, message: 'Counter accepted. Booking created.', data: { booking, bid } });
   } catch (err) {
+    if (err && err.statusCode === 402)
+      return res.status(402).json({ success: false, message: "The buyer's wallet balance is insufficient to fund this booking yet. Ask them to top up before accepting." });
     console.error('acceptCounterBySeller:', err);
     return res.status(500).json({ success: false, message: 'Server error' });
   }

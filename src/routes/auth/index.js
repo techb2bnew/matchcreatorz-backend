@@ -5,7 +5,7 @@ const {
   verifyOtp, resendOtp,
   verifyPhoneOtp, resendPhoneOtp,
   forgotPassword, verifyForgotOtp, resetPassword,
-  google,
+  google, apple,
 } = require('../../controllers/auth/auth.controller');
 const { authenticate }            = require('../../middlewares/auth.middleware');
 const { validateBody }            = require('../../middlewares/validate.middleware');
@@ -51,6 +51,7 @@ router.post('/register',
 
 router.post('/login',      validateBody(authSchemas.login),      login);
 router.post('/google',     google);
+router.post('/apple',      apple);
 router.post('/logout',     authenticate,                          logout);
 router.post('/verify-otp',       validateBody(authSchemas.verifyOtp),      verifyOtp);
 router.post('/resend-otp',       validateBody(authSchemas.forgotPassword),  resendOtp);

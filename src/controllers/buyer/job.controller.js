@@ -1,8 +1,9 @@
 'use strict';
-const { Job, User, Bid, Booking } = require('../../models');
+const { sequelize, Job, User, Bid, Booking } = require('../../models');
 const { Op, literal }             = require('sequelize');
 const notify                      = require('../../helpers/notification.helper');
 const { stripHtml }               = require('../../helpers/text.helper');
+const wallet                      = require('../../services/wallet/wallet.service');
 
 const FEE_PERCENT = 0.10;
 
@@ -457,29 +458,43 @@ exports.acceptBid = async (req, res) => {
       ? bid.counter_delivery_days : bid.delivery_days;
     const fee = Math.round(effAmount * FEE_PERCENT * 100) / 100;
 
-    // 1. Update bid status
-    await bid.update({ status: 'accepted' });
+    // Escrow: hold the agreed amount from the buyer's wallet in the same
+    // transaction as the bid/job/booking updates. If funds are insufficient,
+    // wallet.debit throws 402 and everything rolls back (job stays OPEN,
+    // no bid gets marked accepted/rejected, no booking is created).
+    const booking = await sequelize.transaction(async (t) => {
+      // 1. Update bid status
+      await bid.update({ status: 'accepted' }, { transaction: t });
 
-    // 2. Reject all other bids on this job
-    await Bid.update(
-      { status: 'rejected' },
-      { where: { job_id: job.id, id: { [Op.ne]: bid.id } } }
-    );
+      // 2. Reject all other bids on this job
+      await Bid.update(
+        { status: 'rejected' },
+        { where: { job_id: job.id, id: { [Op.ne]: bid.id } }, transaction: t }
+      );
 
-    // 3. Update job status to IN_PROGRESS
-    await job.update({ status: 'IN_PROGRESS' });
+      // 3. Update job status to IN_PROGRESS
+      await job.update({ status: 'IN_PROGRESS' }, { transaction: t });
 
-    // 4. Create booking at the agreed (effective) terms
-    const booking = await Booking.create({
-      buyer_id:     req.user.id,
-      seller_id:    bid.seller_id,
-      job_id:       job.id,
-      service_id:   null,
-      title:        job.title,
-      amount:       effAmount,
-      platform_fee: fee,
-      delivery_days: effDelivery,
-      status:       'pending',
+      // 4. Create booking at the agreed (effective) terms
+      const b = await Booking.create({
+        buyer_id:      req.user.id,
+        seller_id:     bid.seller_id,
+        job_id:        job.id,
+        service_id:    null,
+        title:         job.title,
+        amount:        effAmount,
+        platform_fee:  fee,
+        delivery_days: effDelivery,
+        status:        'pending',
+        payment_status: 'held',
+      }, { transaction: t });
+
+      await wallet.debit(req.user.id, effAmount, {
+        type: 'booking_payment', booking_id: b.id,
+        note: `Payment held for booking #${b.id} — ${job.title}`,
+      }, t);
+
+      return b;
     });
 
     // Notify seller their bid was accepted
@@ -492,6 +507,8 @@ exports.acceptBid = async (req, res) => {
       data: { booking, bid },
     });
   } catch (err) {
+    if (err && err.statusCode === 402)
+      return res.status(402).json({ success: false, message: 'Insufficient wallet balance — top up before accepting this bid.' });
     console.error('acceptBid:', err);
     return res.status(500).json({ success: false, message: 'Server error' });
   }

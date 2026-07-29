@@ -13,8 +13,21 @@ const { getStats: getAdminStats } = require('../../controllers/admin/stats.contr
 const { listJobs, getJob, closeJob, deleteJob } = require('../../controllers/admin/job.controller');
 const { addConnects, sellerHistory: connectsSellerHistory } = require('../../controllers/admin/connect.controller');
 const { getSettings, updateSettings } = require('../../controllers/admin/setting.controller');
+const { listNotifications, getUnreadCount, markOneRead, markAllRead, deleteOne } = require('../../controllers/shared/notification.controller');
+const { registerFcmToken, clearFcmToken } = require('../../controllers/shared/fcm.controller');
 
 router.use(authenticate, authorize('ADMIN'));
+
+// ── Notifications ──────────────────────────────────────────────────────
+router.get   ('/notifications',              listNotifications);
+router.get   ('/notifications/unread-count', getUnreadCount);
+router.put   ('/notifications/:id/read',     markOneRead);
+router.put   ('/notifications/read-all',     markAllRead);
+router.delete('/notifications/:id',          deleteOne);
+
+// ── Push notification token ───────────────────────────────────────────
+router.put   ('/fcm-token', registerFcmToken);
+router.delete('/fcm-token', clearFcmToken);
 
 // ── Profile ────────────────────────────────────────────────────────────
 router.get ('/profile',         getProfile);

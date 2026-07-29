@@ -588,10 +588,63 @@ const google = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+/**
+ * @swagger
+ * /api/v1/auth/apple:
+ *   post:
+ *     summary: Sign in / sign up with Apple
+ *     description: |
+ *       Send the Apple identity token (`identity_token`) obtained from Sign in with Apple
+ *       (`ASAuthorizationAppleIDCredential.identityToken` on iOS, or the `id_token` from
+ *       Apple's web JS SDK — either field name is accepted).
+ *
+ *       Apple only sends the user's name on the **very first** authorization ever, as a
+ *       separate `user` JSON object (never inside the token itself) — if present, pass it
+ *       through untouched so the account gets a real name instead of falling back to the
+ *       email handle.
+ *       - Existing user → returns `{ token, role, user }`.
+ *       - New user without `role` → returns `{ isNew: true, profile }` so the client can ask for a role.
+ *       - New user with `role` (BUYER|SELLER) → creates the account. BUYER logs in immediately; SELLER is created pending admin approval.
+ *     tags: [Auth]
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [identity_token]
+ *             properties:
+ *               identity_token: { type: string, description: Apple identity token (JWT) }
+ *               id_token:       { type: string, description: "Alias for identity_token (web SDK naming)" }
+ *               user:
+ *                 type: object
+ *                 nullable: true
+ *                 description: Only present on the first-ever authorization — forward it as-is.
+ *                 properties:
+ *                   email: { type: string, nullable: true }
+ *                   name:
+ *                     type: object
+ *                     nullable: true
+ *                     properties:
+ *                       firstName: { type: string, nullable: true }
+ *                       lastName:  { type: string, nullable: true }
+ *               role: { type: string, enum: [BUYER, SELLER], description: Required only when completing a new signup }
+ *     responses:
+ *       200: { description: Logged in, or isNew/pendingApproval info }
+ *       401: { description: Invalid Apple token }
+ */
+const apple = async (req, res, next) => {
+  try {
+    const result = await authService.appleAuth(req.body);
+    return response.success(res, result.token ? 'Login successful' : 'Apple verified', result);
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   register, login, logout,
   verifyOtp, resendOtp,
   verifyPhoneOtp, resendPhoneOtp,
   forgotPassword, verifyForgotOtp, resetPassword,
-  google,
+  google, apple,
 };

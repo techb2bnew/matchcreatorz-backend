@@ -11,6 +11,37 @@ const { OAuth2Client } = require('google-auth-library');
 const crypto           = require('crypto');
 const googleClient     = new OAuth2Client(env.GOOGLE_CLIENT_ID);
 
+// ── Apple Sign-In token verification ──────────────────────────────────
+// Apple's identity token is a JWT signed with Apple's rotating keys —
+// verify it against Apple's public JWKS rather than a fixed secret.
+const jwksClient      = require('jwks-rsa');
+const appleJwksClient = jwksClient({
+  jwksUri:    'https://appleid.apple.com/auth/keys',
+  cache:      true,
+  cacheMaxAge: 24 * 60 * 60 * 1000, // 24h
+});
+
+const getAppleSigningKey = (kid) => new Promise((resolve, reject) => {
+  appleJwksClient.getSigningKey(kid, (err, key) => {
+    if (err) return reject(err);
+    resolve(key.getPublicKey());
+  });
+});
+
+const verifyAppleToken = async (idToken) => {
+  const decoded = jwt.decode(idToken, { complete: true });
+  if (!decoded?.header?.kid) throw new Error('Invalid Apple token header');
+
+  const publicKey = await getAppleSigningKey(decoded.header.kid);
+
+  return new Promise((resolve, reject) => {
+    jwt.verify(idToken, publicKey, { algorithms: ['RS256'], issuer: 'https://appleid.apple.com' }, (err, payload) => {
+      if (err) return reject(err);
+      resolve(payload);
+    });
+  });
+};
+
 const generateOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 
 const signToken = (payload) =>
@@ -81,6 +112,7 @@ const register = async (data) => {
 
   // Fire-and-forget — don't fail registration if notifications fail
   notify.welcome(user);
+  if (role === 'SELLER') notify.sellerRegistered(user);
 
   sendOtp(user.email, user.name, otp).catch(err =>
     console.error('⚠️  OTP email failed:', err.message)
@@ -440,10 +472,112 @@ const googleAuth = async ({ credential, role }) => {
   };
 };
 
+// ── Apple sign-in ─────────────────────────────────────────────────────
+// Flow (mirrors googleAuth):
+//  1. Frontend/app gets an Apple identity token and posts it here, along
+//     with the `user` object Apple's SDK provides — but ONLY on the very
+//     first authorization ever (Apple never resends the name after that).
+//  2. We verify the token against Apple's public keys + our client id(s).
+//  3. Existing user → normal login (returns token).
+//     New user WITHOUT role → { isNew:true, profile } so the UI can ask role.
+//     New user WITH role → create account. BUYER logs in immediately;
+//     SELLER is created pending admin approval (no token yet).
+const appleAuth = async ({ identity_token, id_token, user: appleUser, role }) => {
+  const token = identity_token || id_token;
+  if (!env.APPLE_CLIENT_ID)
+    throw { statusCode: 500, message: 'Apple login is not configured on the server' };
+  if (!token)
+    throw { statusCode: 400, message: 'Apple identity token is required' };
+
+  // 1. Verify the identity token
+  let payload;
+  try {
+    payload = await verifyAppleToken(token);
+  } catch {
+    throw { statusCode: 401, message: 'Invalid or expired Apple token' };
+  }
+
+  const allowedAudiences = env.APPLE_CLIENT_ID.split(',').map((s) => s.trim()).filter(Boolean);
+  if (!allowedAudiences.includes(payload.aud))
+    throw { statusCode: 401, message: 'Apple token was issued for a different client' };
+
+  const rawEmail = payload.email || appleUser?.email;
+  if (!rawEmail) throw { statusCode: 400, message: 'Apple account has no email' };
+  const email = rawEmail.toLowerCase();
+
+  // Apple only sends the name on first authorization, as a separate JSON
+  // field (never inside the token) — fall back to the email handle after that.
+  const appleName = appleUser?.name
+    ? [appleUser.name.firstName, appleUser.name.lastName].filter(Boolean).join(' ')
+    : '';
+  const name = appleName || email.split('@')[0];
+
+  // 2. Existing user?
+  let user = await User.findOne({ where: { email }, paranoid: false });
+
+  if (user) {
+    if (user.deletedAt || user.deleted_at)
+      throw { statusCode: 403, message: 'This account has been deleted.' };
+    if (user.status === 'banned')   throw { statusCode: 403, message: 'Account is banned' };
+    if (user.status === 'inactive') throw { statusCode: 403, message: 'Account is inactive' };
+
+    if (user.role === 'SELLER') {
+      const profile = await SellerProfile.findOne({ where: { user_id: user.id } });
+      if (profile && profile.approval_status === 'rejected')
+        throw { statusCode: 403, message: 'Your seller account has been rejected by admin' };
+      if (profile && profile.approval_status === 'pending')
+        throw { statusCode: 403, message: 'Your seller account is pending admin approval' };
+    }
+
+    const signedToken = signToken({ id: user.id, email: user.email, role: user.role });
+    return {
+      token: signedToken, role: user.role,
+      user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role, is_verified: user.is_verified },
+    };
+  }
+
+  // 3. New user — need a role
+  if (!role) {
+    return { isNew: true, profile: { email, name } };
+  }
+  const chosen = String(role).toUpperCase();
+  if (!['BUYER', 'SELLER'].includes(chosen))
+    throw { statusCode: 400, message: 'role must be BUYER or SELLER' };
+
+  // Apple users have no password — set a strong random one
+  const randomPw = await bcrypt.hash(crypto.randomBytes(24).toString('hex'), 12);
+
+  user = await User.create({
+    name,
+    email,
+    password:    randomPw,
+    role:        chosen,
+    status:      'active',
+    is_verified: true,            // email already verified by Apple
+  });
+
+  if (chosen === 'SELLER') {
+    await SellerProfile.create({ user_id: user.id, approval_status: 'pending' });
+    return {
+      isNew: false,
+      pendingApproval: true,
+      message: 'Seller account created. It is pending admin approval before you can sign in.',
+    };
+  }
+
+  // BUYER → create profile + log in immediately
+  await BuyerProfile.create({ user_id: user.id }).catch(() => {});
+  const signedToken = signToken({ id: user.id, email: user.email, role: user.role });
+  return {
+    token: signedToken, role: user.role,
+    user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role, is_verified: user.is_verified },
+  };
+};
+
 module.exports = {
   register, login, logout,
   verifyOtp, resendOtp,
   verifyPhoneOtp, resendPhoneOtp,
   forgotPasswordByPhone, verifyForgotPhoneOtp, resetPassword,
-  googleAuth,
+  googleAuth, appleAuth,
 };

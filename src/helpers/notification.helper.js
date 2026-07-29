@@ -282,6 +282,68 @@ const chatMessage = async (recipientId, senderName, message) => {
   });
 };
 
+// Support ticket message → always delivered (support is important; not gated by
+// the chat toggle). Push + in-app inbox only, no email.
+const supportMessage = async (recipientId, senderName, message, ticketId) => {
+  const user = await ff(User.findByPk(recipientId, {
+    attributes: ['id', 'name', 'web_fcm_token', 'mobile_fcm_token', 'preferences'],
+  }));
+  if (!user) return;
+  return notifyUser(user, {
+    type:  'support_message',
+    title: `Support: ${senderName || 'New message'}`,
+    body:  String(message.body || '').slice(0, 140),
+    data:  { type: 'support_message', ticket_id: String(ticketId) },
+  });
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// → ADMIN  (broadcast to every admin user; used for anything the ops team
+//   needs to act on: support queue, withdrawal requests, disputes, new sellers)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const notifyAdmins = async ({ type, title, body, data = {} }) => {
+  const admins = await ff(User.findAll({
+    where: { role: 'ADMIN' },
+    attributes: ['id', 'name', 'web_fcm_token', 'mobile_fcm_token', 'preferences'],
+  }));
+  if (!Array.isArray(admins) || !admins.length) return;
+  await Promise.all(admins.map((a) => notifyUser(a, { type, title, body, data })));
+};
+
+// Support ticket with no assigned admin yet → notify EVERY admin (push + inbox),
+// so a new request / an unassigned reply reaches the whole support team.
+const supportToAdmins = (senderName, message, ticketId, isNew = false) => notifyAdmins({
+  type:  'support_message',
+  title: isNew ? `New support ticket from ${senderName || 'a user'}` : `Support reply from ${senderName || 'a user'}`,
+  body:  String(message.body || (message.attachment ? '📎 Attachment' : '')).slice(0, 140),
+  data:  { type: 'support_message', ticket_id: String(ticketId) },
+});
+
+// Seller requested a withdrawal → admin needs to approve/reject it
+const withdrawalRequested = (sellerName, withdrawal) => notifyAdmins({
+  type:  'withdrawal_requested',
+  title: 'New Withdrawal Request',
+  body:  `${sellerName || 'A seller'} requested a withdrawal of $${withdrawal.amount}`,
+  data:  { type: 'withdrawal_requested', withdrawal_id: String(withdrawal.id) },
+});
+
+// Buyer raised a dispute on a booking → admin resolves it
+const disputeRaisedAdmin = (buyerName, booking) => notifyAdmins({
+  type:  'dispute_raised',
+  title: 'Dispute Raised ⚠️',
+  body:  `${buyerName || 'A buyer'} raised a dispute on booking "${booking.title}"`,
+  data:  { type: 'dispute_raised', booking_id: String(booking.id) },
+});
+
+// New seller signed up → awaiting admin approval
+const sellerRegistered = (seller) => notifyAdmins({
+  type:  'seller_registered',
+  title: 'New Seller Signup',
+  body:  `${seller.name} registered as a seller and is awaiting approval.`,
+  data:  { type: 'seller_registered', seller_id: String(seller.id) },
+});
+
 module.exports = {
   // auth
   welcome,
@@ -315,4 +377,12 @@ module.exports = {
   offerReceived,
   // chat
   chatMessage,
+  // support
+  supportMessage,
+  supportToAdmins,
+  // admin
+  notifyAdmins,
+  withdrawalRequested,
+  disputeRaisedAdmin,
+  sellerRegistered,
 };

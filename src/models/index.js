@@ -16,6 +16,11 @@ const Offer         = require('./offer.model');
 const AppSetting    = require('./appSetting.model');
 const Conversation  = require('./conversation.model');
 const Message       = require('./message.model');
+const SupportTicket  = require('./supportTicket.model');
+const SupportMessage = require('./supportMessage.model');
+const Wallet             = require('./wallet.model');
+const WalletTransaction  = require('./walletTransaction.model');
+const Withdrawal         = require('./withdrawal.model');
 
 // ── Associations ──────────────────────────────────────────
 
@@ -104,6 +109,28 @@ Conversation.hasMany(Message, { foreignKey: 'conversation_id', as: 'messages', o
 Message.belongsTo(Conversation, { foreignKey: 'conversation_id', as: 'conversation' });
 Message.belongsTo(User, { foreignKey: 'sender_id', as: 'sender' });
 
+// Support tickets: requester (buyer/seller) + assigned admin + messages
+User.hasMany(SupportTicket, { foreignKey: 'user_id', as: 'supportTickets' });
+SupportTicket.belongsTo(User, { foreignKey: 'user_id', as: 'requester' });
+SupportTicket.belongsTo(User, { foreignKey: 'assigned_admin_id', as: 'assignee' });
+SupportTicket.belongsTo(User, { foreignKey: 'last_sender_id', as: 'lastSender' });
+
+SupportTicket.hasMany(SupportMessage, { foreignKey: 'ticket_id', as: 'messages', onDelete: 'CASCADE' });
+SupportMessage.belongsTo(SupportTicket, { foreignKey: 'ticket_id', as: 'ticket' });
+SupportMessage.belongsTo(User, { foreignKey: 'sender_id', as: 'sender' });
+
+// Wallet: one per user + ledger of transactions
+User.hasOne(Wallet, { foreignKey: 'user_id', as: 'wallet' });
+Wallet.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
+User.hasMany(WalletTransaction, { foreignKey: 'user_id', as: 'walletTransactions' });
+WalletTransaction.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+WalletTransaction.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
+
+// Withdrawals (seller cash-out)
+User.hasMany(Withdrawal, { foreignKey: 'seller_id', as: 'withdrawals' });
+Withdrawal.belongsTo(User, { foreignKey: 'seller_id', as: 'seller' });
+
 // ─────────────────────────────────────────────────────────
 
 const db = {
@@ -124,6 +151,11 @@ const db = {
   AppSetting,
   Conversation,
   Message,
+  SupportTicket,
+  SupportMessage,
+  Wallet,
+  WalletTransaction,
+  Withdrawal,
 };
 
 module.exports = db;
