@@ -1,7 +1,7 @@
 'use strict';
 const bcrypt      = require('bcryptjs');
 const { Op, literal } = require('sequelize');
-const { User, SellerProfile } = require('../../models/index');
+const { User, SellerProfile, Booking, WalletTransaction } = require('../../models/index');
 const { sendAdminWelcome }    = require('../../helpers/email.helper');
 const notify                  = require('../../helpers/notification.helper');
 
@@ -51,8 +51,18 @@ const listSellers = async ({ page = 1, limit = 10, search, approval_status, stat
   const total    = filtered.length;
   const paginated = filtered.slice(offset, offset + Number(limit));
 
+  // Real per-seller stats (completed jobs, lifetime earnings) — only computed
+  // for the current page, since the seller list itself is not paginated at the SQL level.
+  const sellers = await Promise.all(paginated.map(async (u) => {
+    const [jobsCount, earnings] = await Promise.all([
+      Booking.count({ where: { seller_id: u.id, status: 'completed' } }),
+      WalletTransaction.sum('amount', { where: { user_id: u.id, type: 'earning' } }),
+    ]);
+    return formatSeller(u, jobsCount, Number(earnings || 0));
+  }));
+
   return {
-    sellers: paginated.map(formatSeller),
+    sellers,
     total,
     page:    Number(page),
     limit:   Number(limit),
@@ -66,7 +76,11 @@ const getSellerById = async (id) => {
     include: [sellerInclude],
   });
   if (!user) throw { statusCode: 404, message: 'Seller not found' };
-  return formatSeller(user);
+  const [jobsCount, earnings] = await Promise.all([
+    Booking.count({ where: { seller_id: user.id, status: 'completed' } }),
+    WalletTransaction.sum('amount', { where: { user_id: user.id, type: 'earning' } }),
+  ]);
+  return formatSeller(user, jobsCount, Number(earnings || 0));
 };
 
 // ── Add seller ────────────────────────────────────────────────────────
@@ -165,7 +179,7 @@ const unblockSeller = async (id) => {
 };
 
 // ── Format helper ──────────────────────────────────────────────────────
-const formatSeller = (user) => ({
+const formatSeller = (user, jobsCount = 0, earnings = 0) => ({
   id:          user.id,
   name:        user.name,
   email:       user.email,
@@ -174,6 +188,8 @@ const formatSeller = (user) => ({
   is_verified: user.is_verified,
   joined:      user.createdAt,
   profile:     user.sellerProfile || null,
+  jobs_count:  jobsCount,
+  earnings,
 });
 
 module.exports = { listSellers, getSellerById, addSeller, editSeller, approveSeller, rejectSeller, blockSeller, unblockSeller };

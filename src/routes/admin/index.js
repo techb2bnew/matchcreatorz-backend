@@ -1,5 +1,6 @@
 'use strict';
 const router = require('express').Router();
+const multer = require('multer');
 const { authenticate, authorize } = require('../../middlewares/auth.middleware');
 
 const { listSellers, getSellerById, addSeller, editSeller, approveSeller, rejectSeller, blockSeller, unblockSeller } = require('../../controllers/admin/seller.controller');
@@ -15,6 +16,17 @@ const { addConnects, sellerHistory: connectsSellerHistory } = require('../../con
 const { getSettings, updateSettings } = require('../../controllers/admin/setting.controller');
 const { listNotifications, getUnreadCount, markOneRead, markAllRead, deleteOne } = require('../../controllers/shared/notification.controller');
 const { registerFcmToken, clearFcmToken } = require('../../controllers/shared/fcm.controller');
+const { listBanners, createBanner, updateBanner, deleteBanner } = require('../../controllers/admin/banner.controller');
+const { listPages, updatePage } = require('../../controllers/admin/page.controller');
+
+const imageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
+    allowed.has(file.mimetype) ? cb(null, true) : cb(new Error('Only JPG, PNG, WEBP allowed'));
+  },
+});
 
 router.use(authenticate, authorize('ADMIN'));
 
@@ -95,5 +107,15 @@ router.get   ('/reviews',              listAdminReviews);
 router.patch ('/reviews/:id/publish',  publishReview);
 router.patch ('/reviews/:id/hide',     hideReview);
 router.delete('/reviews/:id',          deleteReview);
+
+// ── Banners ────────────────────────────────────────────────────────────
+router.get   ('/banners',      listBanners);
+router.post  ('/banners',      imageUpload.single('image'), createBanner);
+router.put   ('/banners/:id',  imageUpload.single('image'), updateBanner);
+router.delete('/banners/:id',  deleteBanner);
+
+// ── Static Pages ───────────────────────────────────────────────────────
+router.get ('/pages',      listPages);
+router.put ('/pages/:id',  updatePage);
 
 module.exports = router;

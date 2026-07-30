@@ -10,11 +10,12 @@ const { changePassword, deleteAccount, getPreferences, updatePreferences } = req
 const { registerFcmToken, clearFcmToken } = require('../../controllers/shared/fcm.controller');
 const { listNotifications, getUnreadCount, markOneRead, markAllRead, deleteOne: deleteNotification } = require('../../controllers/shared/notification.controller');
 const { browseJobs, getJobDetail, placeBid, updateBid, withdrawBid, myBids, counterBidBySeller, acceptCounterBySeller } = require('../../controllers/seller/job.controller');
-const { listBookings: listSellerBookings, getBooking: getSellerBooking, acceptOrder, submitWork, cancelBooking: cancelSellerBooking } = require('../../controllers/seller/booking.controller');
+const { listBookings: listSellerBookings, getBooking: getSellerBooking, acceptOrder, submitWork, cancelBooking: cancelSellerBooking, createMilestones, submitMilestone, uploadAttachment: uploadBookingAttachment } = require('../../controllers/seller/booking.controller');
 const { listReviews: listSellerReviews } = require('../../controllers/seller/review.controller');
 const { getStats: getSellerStats }       = require('../../controllers/seller/stats.controller');
 const { getBalance: getConnectsBalance, getHistory: getConnectsHistory, getPlans: getConnectsPlans, purchasePlan: purchaseConnects, confirmPurchase: confirmConnectsPurchase } = require('../../controllers/seller/connect.controller');
 const { sendOffer, listSentOffers, withdrawOffer } = require('../../controllers/shared/offer.controller');
+const { sendFeedback } = require('../../controllers/shared/feedback.controller');
 const { searchBuyers } = require('../../controllers/seller/buyer.controller');
 
 const imageUpload = multer({
@@ -35,6 +36,22 @@ const resumeUpload = multer({
   },
 });
 
+// Proof-of-work attachments for booking/milestone submission (image / pdf / doc / etc., max 10 MB)
+const bookingUpload = multer({
+  storage: multer.memoryStorage(),
+  limits:  { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ok = new Set([
+      'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif',
+      'application/pdf', 'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'text/plain', 'application/zip',
+    ]);
+    ok.has(file.mimetype) ? cb(null, true) : cb(new Error('Unsupported file type'));
+  },
+});
+
 router.use(authenticate, authorize('SELLER'));
 
 // ── Profile ────────────────────────────────────────────────────────────
@@ -46,6 +63,7 @@ router.get   ('/preferences',     getPreferences);
 router.put   ('/preferences',     updatePreferences);
 router.put   ('/fcm-token',       registerFcmToken);
 router.delete('/fcm-token',       clearFcmToken);
+router.post  ('/feedback',        sendFeedback);
 
 // ── Notifications ──────────────────────────────────────────────────────
 router.get   ('/notifications',              listNotifications);
@@ -65,11 +83,14 @@ router.patch ('/services/:id/publish',  publishService);
 router.patch ('/services/:id/pause',    pauseService);
 
 // ── Bookings ───────────────────────────────────────────────────────────
-router.get   ('/bookings',              listSellerBookings);
-router.get   ('/bookings/:id',          getSellerBooking);
-router.patch ('/bookings/:id/accept',   acceptOrder);
-router.patch ('/bookings/:id/submit',   submitWork);
-router.patch ('/bookings/:id/cancel',   cancelSellerBooking);
+router.post  ('/bookings/upload',                      bookingUpload.single('file'), uploadBookingAttachment);
+router.get   ('/bookings',                              listSellerBookings);
+router.get   ('/bookings/:id',                          getSellerBooking);
+router.patch ('/bookings/:id/accept',                   acceptOrder);
+router.patch ('/bookings/:id/submit',                   submitWork);
+router.patch ('/bookings/:id/cancel',                   cancelSellerBooking);
+router.post  ('/bookings/:id/milestones',                createMilestones);
+router.patch ('/bookings/:id/milestones/:milestoneId/submit', submitMilestone);
 
 // ── Browse Jobs & Bidding ──────────────────────────────────────────────
 router.get   ('/bids',           myBids);

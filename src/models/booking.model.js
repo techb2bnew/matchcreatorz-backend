@@ -84,6 +84,21 @@ const Booking = sequelize.define('Booking', {
     allowNull: true,
   },
 
+  // Proof-of-work files the seller attaches when submitting (whole-booking
+  // flow, i.e. no milestones). Array of { url, name, type, size }.
+  attachments: {
+    type:         DataTypes.JSONB,
+    allowNull:    false,
+    defaultValue: [],
+  },
+
+  // Seller's message describing the delivered work (kept separate from
+  // `notes`, which is the buyer's note left when the booking was created).
+  submission_notes: {
+    type:      DataTypes.TEXT,
+    allowNull: true,
+  },
+
 }, {
   tableName:  'bookings',
   timestamps: true,

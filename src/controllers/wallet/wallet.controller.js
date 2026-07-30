@@ -1,6 +1,6 @@
 'use strict';
 const { Op } = require('sequelize');
-const { sequelize, Wallet, WalletTransaction, Withdrawal, Booking, User } = require('../../models');
+const { sequelize, Wallet, WalletTransaction, Withdrawal, Booking, BookingMilestone, User } = require('../../models');
 const wallet     = require('../../services/wallet/wallet.service');
 const topup      = require('../../services/wallet/topup.service');
 const withdraw   = require('../../services/wallet/withdrawal.service');
@@ -45,13 +45,44 @@ exports.config = async (req, res) => response.success(res, 'Wallet config', {
  * /api/v1/wallet:
  *   get:
  *     summary: My wallet summary (balance, pending, totals)
+ *     description: |
+ *       For buyers, also includes `pending_payment` — the total across submitted
+ *       work/milestones awaiting review, which will be charged from the wallet
+ *       the moment the buyer accepts it.
  *     tags: [Wallet]
  *     security: [{ bearerAuth: [] }]
  *     responses: { 200: { description: Wallet summary } }
  */
 exports.summary = async (req, res, next) => {
-  try { return response.success(res, 'Wallet', await wallet.getSummary(req.user.id)); }
-  catch (err) { return fail(res, err, next); }
+  try {
+    const data = await wallet.getSummary(req.user.id);
+    if (req.user.role === 'BUYER') {
+      // Buyer isn't charged until they click Accept, so "pending payment" is:
+      // whole-booking submissions awaiting review (non-milestone) + individual
+      // submitted milestones — whatever a fresh Accept click would charge.
+      // `payment_status !== 'held'` guards against legacy bookings from before
+      // this flow, whose money was already collected up front.
+      const pendingBookings = await Booking.findAll({
+        where: { buyer_id: req.user.id, status: 'amidst_completion', payment_status: { [Op.ne]: 'held' } },
+        attributes: ['id', 'amount'],
+        include: [{ model: BookingMilestone, as: 'milestones', attributes: ['id'] }],
+      });
+      const wholeBookingPending = pendingBookings
+        .filter((b) => !b.milestones.length)
+        .reduce((sum, b) => sum + Number(b.amount), 0);
+
+      const buyerBookingIds = (await Booking.findAll({
+        where: { buyer_id: req.user.id }, attributes: ['id'],
+      })).map((b) => b.id);
+      const milestonePending = buyerBookingIds.length
+        ? await BookingMilestone.sum('amount', {
+            where: { status: 'submitted', payment_status: { [Op.ne]: 'held' }, booking_id: { [Op.in]: buyerBookingIds } },
+          })
+        : 0;
+      data.pending_payment = wallet.round2(wholeBookingPending + (milestonePending || 0));
+    }
+    return response.success(res, 'Wallet', data);
+  } catch (err) { return fail(res, err, next); }
 };
 
 /**
@@ -278,18 +309,26 @@ exports.rejectWithdrawal = async (req, res, next) => {
 exports.adminOverview = async (req, res, next) => {
   try {
     if (!requireRole(req, 'ADMIN')) return response.forbidden(res, 'Admins only');
-    const [revenue, escrow, topups, earnings, pendingW, paidW] = await Promise.all([
+    const [revenue, wholeBookingEscrow, inProgressBookings, topups, earnings, pendingW, paidW] = await Promise.all([
       WalletTransaction.sum('amount', { where: { type: 'platform_fee' } }),
       Booking.sum('amount', { where: { payment_status: 'held' } }),
+      Booking.findAll({ where: { payment_status: 'unpaid' }, attributes: ['id'] }),
       WalletTransaction.sum('amount', { where: { type: 'topup' } }),
       WalletTransaction.sum('amount', { where: { type: 'earning' } }),
       Withdrawal.sum('amount', { where: { status: 'pending' } }),
       Withdrawal.sum('amount', { where: { status: 'paid' } }),
     ]);
+    // Only count milestone-level holds for bookings still 'unpaid' at the booking
+    // level (new per-stage flow) — a booking already 'held' (legacy lump-sum, or
+    // a non-milestone hold) must not also be counted per-milestone.
+    const inProgressBookingIds = inProgressBookings.map((b) => b.id);
+    const milestoneEscrow = inProgressBookingIds.length
+      ? await BookingMilestone.sum('amount', { where: { payment_status: 'held', booking_id: { [Op.in]: inProgressBookingIds } } })
+      : 0;
     const myWallet = await wallet.getSummary(req.user.id);
     return response.success(res, 'Overview', {
       platform_revenue:   wallet.round2(revenue || 0),
-      escrow_held:        wallet.round2(escrow || 0),
+      escrow_held:        wallet.round2((wholeBookingEscrow || 0) + (milestoneEscrow || 0)),
       total_topups:       wallet.round2(topups || 0),
       total_earnings_paid:wallet.round2(earnings || 0),
       pending_withdrawals:wallet.round2(pendingW || 0),

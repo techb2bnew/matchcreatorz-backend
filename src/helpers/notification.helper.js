@@ -36,7 +36,10 @@ const categoryOf = (type) => {
     type.startsWith('bid') ||
     ['work_submitted', 'work_accepted', 'dispute_raised'].includes(type)
   ) return 'bookingAlert';
-  if (type === 'connects_added' || type.includes('payment') || type.includes('payout')) return 'payAlert';
+  if (
+    type === 'connects_added' || type.includes('payment') || type.includes('payout') ||
+    ['withdrawal_paid', 'withdrawal_rejected', 'withdrawal_failed'].includes(type)
+  ) return 'payAlert';
   if (type === 'offer_received') return 'offerAlert';
   if (type === 'chat_message') return 'chatAlert';
   return null; // review_received, account status, etc. → always on
@@ -254,6 +257,27 @@ const connectsAdded = (seller, amount, note) => notifyUser(seller, {
   email: () => email.sendConnectsAdded(seller.email, seller.name, amount, note),
 });
 
+// Admin approved a withdrawal → real Stripe transfer sent to the seller's connected account
+const withdrawalPaid = (seller, withdrawal) => notifyUser(seller, {
+  type: 'withdrawal_paid', title: 'Withdrawal Approved 💸',
+  body: `Your withdrawal of $${withdrawal.amount} has been approved and sent to your bank account via Stripe.`,
+  data: { type: 'withdrawal_paid', withdrawal_id: String(withdrawal.id) },
+});
+
+// Admin rejected a withdrawal → funds returned to the seller's wallet
+const withdrawalRejected = (seller, withdrawal, note) => notifyUser(seller, {
+  type: 'withdrawal_rejected', title: 'Withdrawal Rejected',
+  body: `Your withdrawal request of $${withdrawal.amount} was rejected${note ? `: ${note}` : ''}. The amount has been returned to your wallet.`,
+  data: { type: 'withdrawal_rejected', withdrawal_id: String(withdrawal.id) },
+});
+
+// Stripe transfer itself failed after admin approval — funds stay in the wallet
+const withdrawalFailed = (seller, withdrawal, reason) => notifyUser(seller, {
+  type: 'withdrawal_failed', title: 'Withdrawal Failed ⚠️',
+  body: `We couldn't process your withdrawal of $${withdrawal.amount}${reason ? `: ${reason}` : ''}. The amount is still in your wallet.`,
+  data: { type: 'withdrawal_failed', withdrawal_id: String(withdrawal.id) },
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // OFFERS  (category: offerAlert)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -344,6 +368,14 @@ const sellerRegistered = (seller) => notifyAdmins({
   data:  { type: 'seller_registered', seller_id: String(seller.id) },
 });
 
+// User submitted feedback from Settings → Send Feedback
+const feedbackReceived = (userName, feedback) => notifyAdmins({
+  type:  'feedback_received',
+  title: 'New Feedback Received',
+  body:  `${userName || 'A user'} sent feedback${feedback.subject ? `: "${feedback.subject}"` : ''}`,
+  data:  { type: 'feedback_received', feedback_id: String(feedback.id) },
+});
+
 module.exports = {
   // auth
   welcome,
@@ -373,6 +405,10 @@ module.exports = {
   reviewReceived,
   // connects
   connectsAdded,
+  // withdrawals (seller-facing)
+  withdrawalPaid,
+  withdrawalRejected,
+  withdrawalFailed,
   // offers
   offerReceived,
   // chat
@@ -385,4 +421,5 @@ module.exports = {
   withdrawalRequested,
   disputeRaisedAdmin,
   sellerRegistered,
+  feedbackReceived,
 };

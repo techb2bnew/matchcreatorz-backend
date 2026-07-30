@@ -170,3 +170,67 @@ exports.cancelBooking = async (req, res, next) => {
     return response.success(res, 'Booking cancelled', data);
   } catch (err) { next(err); }
 };
+
+/**
+ * @swagger
+ * /api/v1/buyer/bookings/{id}/milestones/{milestoneId}/accept:
+ *   patch:
+ *     summary: Accept a submitted milestone (releases that stage's payout to the seller)
+ *     description: Once every milestone on a booking is accepted, the booking itself is marked completed automatically.
+ *     tags: [Buyer - Bookings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *       - in: path
+ *         name: milestoneId
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: Milestone accepted and paid out }
+ *       400: { description: Milestone is not awaiting acceptance }
+ *       404: { description: Not found }
+ */
+exports.acceptMilestone = async (req, res, next) => {
+  try {
+    const data = await svc.acceptMilestone(req.user.id, req.params.id, req.params.milestoneId);
+    return response.success(res, 'Milestone accepted', data);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
+ * /api/v1/buyer/bookings/{id}/milestones/{milestoneId}/reject:
+ *   patch:
+ *     summary: Reject a submitted milestone (seller can resubmit just this stage)
+ *     tags: [Buyer - Bookings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *       - in: path
+ *         name: milestoneId
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               dispute_reason: { type: string }
+ *     responses:
+ *       200: { description: Milestone rejected }
+ *       400: { description: Milestone is not awaiting acceptance }
+ *       404: { description: Not found }
+ */
+exports.rejectMilestone = async (req, res, next) => {
+  try {
+    const data = await svc.rejectMilestone(req.user.id, req.params.id, req.params.milestoneId, req.body.dispute_reason);
+    return response.success(res, 'Milestone rejected', data);
+  } catch (err) { next(err); }
+};

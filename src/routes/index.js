@@ -9,5 +9,6 @@ router.use('/chat',       require('./chat'));
 router.use('/support',    require('./support'));
 router.use('/wallet',     require('./wallet'));
 router.use('/categories', require('./categories'));
+router.use('/public',     require('./publicStats'));
 
 module.exports = router;

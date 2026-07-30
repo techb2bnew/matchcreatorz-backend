@@ -3,7 +3,6 @@ const { sequelize, Job, User, Bid, Booking } = require('../../models');
 const { Op, literal }             = require('sequelize');
 const notify                      = require('../../helpers/notification.helper');
 const { stripHtml }               = require('../../helpers/text.helper');
-const wallet                      = require('../../services/wallet/wallet.service');
 
 const FEE_PERCENT = 0.10;
 
@@ -82,6 +81,33 @@ exports.listMyJobs = async (req, res) => {
     });
   } catch (err) {
     console.error('listMyJobs:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ── Aggregate stats across ALL of the buyer's jobs (not just the current page) ──
+/**
+ * @swagger
+ * /api/v1/buyer/jobs/stats:
+ *   get:
+ *     summary: Aggregate counters for my posted jobs (total, open, in progress, total bids)
+ *     tags: [Buyer - Jobs]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Aggregate job stats }
+ */
+exports.getJobStats = async (req, res) => {
+  try {
+    const buyer_id = req.user.id;
+    const [total, open, inProgress, totalBids] = await Promise.all([
+      Job.count({ where: { buyer_id } }),
+      Job.count({ where: { buyer_id, status: 'OPEN' } }),
+      Job.count({ where: { buyer_id, status: 'IN_PROGRESS' } }),
+      Job.sum('bids_count', { where: { buyer_id } }),
+    ]);
+    return res.json({ success: true, data: { total, open, inProgress, totalBids: totalBids || 0 } });
+  } catch (err) {
+    console.error('getJobStats:', err);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
@@ -458,10 +484,8 @@ exports.acceptBid = async (req, res) => {
       ? bid.counter_delivery_days : bid.delivery_days;
     const fee = Math.round(effAmount * FEE_PERCENT * 100) / 100;
 
-    // Escrow: hold the agreed amount from the buyer's wallet in the same
-    // transaction as the bid/job/booking updates. If funds are insufficient,
-    // wallet.debit throws 402 and everything rolls back (job stays OPEN,
-    // no bid gets marked accepted/rejected, no booking is created).
+    // No wallet charge here — payment is deferred until the seller actually
+    // submits work. The bid/job/booking updates still happen atomically.
     const booking = await sequelize.transaction(async (t) => {
       // 1. Update bid status
       await bid.update({ status: 'accepted' }, { transaction: t });
@@ -486,13 +510,7 @@ exports.acceptBid = async (req, res) => {
         platform_fee:  fee,
         delivery_days: effDelivery,
         status:        'pending',
-        payment_status: 'held',
       }, { transaction: t });
-
-      await wallet.debit(req.user.id, effAmount, {
-        type: 'booking_payment', booking_id: b.id,
-        note: `Payment held for booking #${b.id} — ${job.title}`,
-      }, t);
 
       return b;
     });
@@ -507,8 +525,6 @@ exports.acceptBid = async (req, res) => {
       data: { booking, bid },
     });
   } catch (err) {
-    if (err && err.statusCode === 402)
-      return res.status(402).json({ success: false, message: 'Insufficient wallet balance — top up before accepting this bid.' });
     console.error('acceptBid:', err);
     return res.status(500).json({ success: false, message: 'Server error' });
   }

@@ -10,6 +10,7 @@ const swaggerSpec    = require('./config/swagger');
 const env            = require('./config/env');
 const routes         = require('./routes/index');
 const { errorHandler, notFoundHandler } = require('./middlewares/error.middleware');
+const { sequelize }  = require('./models');
 
 const app = express();
 
@@ -69,8 +70,17 @@ app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // ── Logger ────────────────────────────────────────────────────
+// Skip logging 404s for paths outside our own API — this is almost always
+// automated vulnerability-scanner noise (.env, .git, wp-config, actuator,
+// etc.), not real traffic, and it drowns out useful logs otherwise.
+const isScannerNoise = (req, res) =>
+  res.statusCode === 404 &&
+  !req.path.startsWith('/api/') &&
+  req.path !== '/health' &&
+  req.path !== '/api-docs';
+
 if (env.NODE_ENV !== 'test') {
-  app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+  app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev', { skip: isScannerNoise }));
 }
 
 // ── Static files (public/) ────────────────────────────────────
@@ -83,14 +93,23 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
 }));
 
 // ── Health check ──────────────────────────────────────────────
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
+  let dbStatus = 'unknown';
+  try {
+    await sequelize.authenticate();
+    dbStatus = 'healthy';
+  } catch {
+    dbStatus = 'unreachable';
+  }
   res.json({
-    status:  'OK',
-    service: 'MatchCreatorz API',
-    version: '1.0.0',
-    env:     env.NODE_ENV,
-    docs:    `http://localhost:${env.PORT}/api-docs`,
-    time:    new Date().toISOString(),
+    status:      'OK',
+    service:     'MatchCreatorz API',
+    version:     '1.0.0',
+    env:         env.NODE_ENV,
+    db:          dbStatus,
+    uptime_secs: Math.round(process.uptime()),
+    docs:        `http://localhost:${env.PORT}/api-docs`,
+    time:        new Date().toISOString(),
   });
 });
 

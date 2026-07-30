@@ -53,7 +53,7 @@ const { stripHtml }                      = require('../../helpers/text.helper');
 exports.searchServices = async (req, res) => {
   try {
     const {
-      search, category,
+      id, search, category,
       price_min, price_max,
       rating, delivery_days,
       sort = 'relevance',
@@ -62,6 +62,8 @@ exports.searchServices = async (req, res) => {
 
     // -- Service WHERE -------------------------------------------------
     const where = { status: 'active' };
+
+    if (id) where.id = Number(id);
 
     if (search && search.trim()) {
       const term = search.trim();

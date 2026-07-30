@@ -8,6 +8,7 @@ const Service       = require('./service.model');
 const Job           = require('./job.model');
 const Bid           = require('./bid.model');
 const Booking       = require('./booking.model');
+const BookingMilestone = require('./bookingMilestone.model');
 const Review        = require('./review.model');
 const Notification  = require('./notification.model');
 const Favourite     = require('./favourite.model');
@@ -21,6 +22,9 @@ const SupportMessage = require('./supportMessage.model');
 const Wallet             = require('./wallet.model');
 const WalletTransaction  = require('./walletTransaction.model');
 const Withdrawal         = require('./withdrawal.model');
+const Feedback           = require('./feedback.model');
+const Banner             = require('./banner.model');
+const Page               = require('./page.model');
 
 // ── Associations ──────────────────────────────────────────
 
@@ -64,6 +68,10 @@ Booking.belongsTo(Service, { foreignKey: 'service_id', as: 'service' });
 
 Job.hasMany(Booking, { foreignKey: 'job_id', as: 'bookings' });
 Booking.belongsTo(Job, { foreignKey: 'job_id', as: 'job' });
+
+// Booking ↔ Milestones (1:many)
+Booking.hasMany(BookingMilestone, { foreignKey: 'booking_id', as: 'milestones', onDelete: 'CASCADE' });
+BookingMilestone.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
 
 // Review associations
 User.hasMany(Review, { foreignKey: 'buyer_id',  as: 'givenReviews'    });
@@ -131,6 +139,10 @@ WalletTransaction.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' }
 User.hasMany(Withdrawal, { foreignKey: 'seller_id', as: 'withdrawals' });
 Withdrawal.belongsTo(User, { foreignKey: 'seller_id', as: 'seller' });
 
+// Feedback (Settings → Send Feedback)
+User.hasMany(Feedback, { foreignKey: 'user_id', as: 'feedback' });
+Feedback.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
 // ─────────────────────────────────────────────────────────
 
 const db = {
@@ -143,6 +155,7 @@ const db = {
   Job,
   Bid,
   Booking,
+  BookingMilestone,
   Review,
   Notification,
   Favourite,
@@ -156,6 +169,9 @@ const db = {
   Wallet,
   WalletTransaction,
   Withdrawal,
+  Feedback,
+  Banner,
+  Page,
 };
 
 module.exports = db;

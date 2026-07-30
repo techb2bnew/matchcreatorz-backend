@@ -1,0 +1,60 @@
+'use strict';
+const { DataTypes } = require('sequelize');
+const sequelize     = require('../config/db');
+
+// Optional per-booking milestones — a seller can split a booking's total
+// amount into stages, submit proof-of-work per stage, and get paid out
+// (from the already-held escrow) as each stage is individually accepted.
+const BookingMilestone = sequelize.define('BookingMilestone', {
+
+  id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+
+  booking_id: {
+    type:       DataTypes.INTEGER,
+    allowNull:  false,
+    references: { model: 'bookings', key: 'id' },
+    onDelete:   'CASCADE',
+  },
+
+  title: { type: DataTypes.STRING(200), allowNull: false },
+
+  amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+
+  // Display order — the sequence the seller defined the stages in.
+  position: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+
+  // How many days this stage is expected to take (optional, seller-set).
+  duration_days: { type: DataTypes.INTEGER, allowNull: true },
+
+  status: {
+    type:         DataTypes.ENUM('pending', 'submitted', 'approved', 'rejected'),
+    allowNull:    false,
+    defaultValue: 'pending',
+  },
+
+  // Charged from the buyer's wallet only once this stage is submitted
+  // (deferred payment — see seller/booking.service.js submitMilestone).
+  payment_status: {
+    type:         DataTypes.ENUM('unpaid', 'held', 'released'),
+    allowNull:    false,
+    defaultValue: 'unpaid',
+  },
+
+  // Proof-of-work for this stage — array of { url, name, type, size }.
+  attachments: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+
+  notes:           { type: DataTypes.TEXT, allowNull: true }, // seller's submission note
+  dispute_reason:  { type: DataTypes.TEXT, allowNull: true }, // buyer's rejection reason
+
+  submitted_at: { type: DataTypes.DATE, allowNull: true },
+  approved_at:  { type: DataTypes.DATE, allowNull: true },
+
+}, {
+  tableName:  'booking_milestones',
+  timestamps: true,
+  underscored: true,
+  paranoid:   false,
+  indexes: [{ fields: ['booking_id'] }],
+});
+
+module.exports = BookingMilestone;

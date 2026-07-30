@@ -1,5 +1,5 @@
 'use strict';
-const { Op } = require('sequelize');
+const { Op, literal } = require('sequelize');
 const { Conversation, Message, User, Bid, Job, Offer, Booking } = require('../../models');
 const notify = require('../../helpers/notification.helper');
 
@@ -118,7 +118,11 @@ const listConversations = async (me, { page = 1, limit = 20 }) => {
       { model: User, as: 'userOne', attributes: USER_ATTRS },
       { model: User, as: 'userTwo', attributes: USER_ATTRS },
     ],
-    order:  [['last_message_at', 'DESC NULLS LAST'], ['updated_at', 'DESC']],
+    // A brand-new conversation with no messages yet has a null last_message_at —
+    // "DESC NULLS LAST" would always sink it below every conversation that has
+    // ANY message, however old. Coalescing to updated_at instead ranks it by
+    // its own recency (e.g. just opened → shows up top, not at the bottom).
+    order: [[literal('COALESCE("Conversation"."last_message_at", "Conversation"."updated_at")'), 'DESC']],
     limit:  Number(limit),
     offset,
   });

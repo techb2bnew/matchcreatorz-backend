@@ -88,6 +88,8 @@ const approveWithdrawal = async (adminId, id) => {
     }
   } catch (e) {
     await wd.update({ status: 'failed', admin_id: adminId, admin_note: e.message, processed_at: new Date() });
+    const failedSeller = await User.findByPk(wd.seller_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
+    if (failedSeller) notify.withdrawalFailed(failedSeller, wd, e.message);
     throw Object.assign(new Error(`Stripe transfer failed: ${e.message}`), { statusCode: 402 });
   }
 
@@ -97,6 +99,9 @@ const approveWithdrawal = async (adminId, id) => {
       status: 'paid', admin_id: adminId, stripe_transfer_id: transferId, processed_at: new Date(),
     }, { transaction: t });
   });
+
+  const paidSeller = await User.findByPk(wd.seller_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
+  if (paidSeller) notify.withdrawalPaid(paidSeller, wd);
 
   return wd;
 };
@@ -114,6 +119,9 @@ const rejectWithdrawal = async (adminId, id, note) => {
     }, t);
     await wd.update({ status: 'rejected', admin_id: adminId, admin_note: note || null, processed_at: new Date() }, { transaction: t });
   });
+
+  const seller = await User.findByPk(wd.seller_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
+  if (seller) notify.withdrawalRejected(seller, wd, note);
 
   return wd;
 };

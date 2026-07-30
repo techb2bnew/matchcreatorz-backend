@@ -28,7 +28,10 @@ const WalletTransaction = sequelize.define('WalletTransaction', {
       'platform_fee',       // platform commission — recorded on admin wallet
       'withdrawal',         // seller withdrawal — debit
       'withdrawal_reversal',// rejected/failed withdrawal returned — credit
-      'adjustment'          // manual admin adjustment
+      'adjustment',         // manual admin adjustment
+      'milestone_release'   // informational only (amount 0) — buyer-side receipt of an
+                             // escrow release, so their ledger shows where the held
+                             // money went, milestone by milestone
     ),
     allowNull: false,
   },

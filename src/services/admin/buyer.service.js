@@ -1,7 +1,7 @@
 'use strict';
 const bcrypt     = require('bcryptjs');
 const { Op, literal } = require('sequelize');
-const { User, BuyerProfile } = require('../../models/index');
+const { User, BuyerProfile, Booking, Wallet } = require('../../models/index');
 const { sendAdminWelcome }   = require('../../helpers/email.helper');
 const notify                 = require('../../helpers/notification.helper');
 
@@ -41,7 +41,17 @@ const listBuyers = async ({ page = 1, limit = 10, search, status, deleted }) => 
   const total     = filtered.length;
   const paginated = filtered.slice(offset, offset + Number(limit));
 
-  return { buyers: paginated.map(formatBuyer), total, page: Number(page), limit: Number(limit) };
+  // Real per-buyer stats (bookings placed, total spent) — only computed for
+  // the current page, since the buyer list itself is not paginated at the SQL level.
+  const buyers = await Promise.all(paginated.map(async (u) => {
+    const [bookingsCount, wallet] = await Promise.all([
+      Booking.count({ where: { buyer_id: u.id } }),
+      Wallet.findOne({ where: { user_id: u.id }, attributes: ['total_out'] }),
+    ]);
+    return formatBuyer(u, bookingsCount, Number(wallet?.total_out || 0));
+  }));
+
+  return { buyers, total, page: Number(page), limit: Number(limit) };
 };
 
 // ── Get buyer by ID ───────────────────────────────────────────────────
@@ -51,7 +61,11 @@ const getBuyerById = async (id) => {
     include: [buyerInclude],
   });
   if (!user) throw { statusCode: 404, message: 'Buyer not found' };
-  return formatBuyer(user);
+  const [bookingsCount, wallet] = await Promise.all([
+    Booking.count({ where: { buyer_id: user.id } }),
+    Wallet.findOne({ where: { user_id: user.id }, attributes: ['total_out'] }),
+  ]);
+  return formatBuyer(user, bookingsCount, Number(wallet?.total_out || 0));
 };
 
 // ── Add buyer ─────────────────────────────────────────────────────────
@@ -120,7 +134,7 @@ const unblockBuyer = async (id) => {
 };
 
 // ── Format helper ─────────────────────────────────────────────────────
-const formatBuyer = (user) => ({
+const formatBuyer = (user, bookingsCount = 0, totalSpent = 0) => ({
   id:          user.id,
   name:        user.name,
   email:       user.email,
@@ -129,6 +143,8 @@ const formatBuyer = (user) => ({
   is_verified: user.is_verified,
   joined:      user.createdAt,
   profile:     user.buyerProfile || null,
+  bookings_count: bookingsCount,
+  total_spent:    totalSpent,
 });
 
 module.exports = { listBuyers, getBuyerById, addBuyer, editBuyer, blockBuyer, unblockBuyer };

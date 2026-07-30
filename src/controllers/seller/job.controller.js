@@ -4,7 +4,6 @@ const { Op, literal }    = require('sequelize');
 const notify             = require('../../helpers/notification.helper');
 const { applyConnects, getBidCost } = require('../../helpers/connects.helper');
 const { stripHtml }               = require('../../helpers/text.helper');
-const wallet             = require('../../services/wallet/wallet.service');
 
 const FEE_PERCENT = 0.10;
 
@@ -429,9 +428,8 @@ exports.acceptCounterBySeller = async (req, res) => {
     const effDelivery = bid.counter_delivery_days != null ? bid.counter_delivery_days : bid.delivery_days;
     const fee = Math.round(effAmount * FEE_PERCENT * 100) / 100;
 
-    // Escrow: hold the agreed amount from the buyer's wallet in the same
-    // transaction as the bid/job/booking updates (mirrors direct service
-    // bookings). If the buyer lacks funds, everything rolls back.
+    // No wallet charge here — payment is deferred until the seller actually
+    // submits work. The bid/job/booking updates still happen atomically.
     const booking = await sequelize.transaction(async (t) => {
       await bid.update({ status: 'accepted' }, { transaction: t });
       await Bid.update({ status: 'rejected' }, { where: { job_id: job.id, id: { [Op.ne]: bid.id } }, transaction: t });
@@ -447,13 +445,7 @@ exports.acceptCounterBySeller = async (req, res) => {
         platform_fee:  fee,
         delivery_days: effDelivery,
         status:        'pending',
-        payment_status: 'held',
       }, { transaction: t });
-
-      await wallet.debit(job.buyer_id, effAmount, {
-        type: 'booking_payment', booking_id: b.id,
-        note: `Payment held for booking #${b.id} — ${job.title}`,
-      }, t);
 
       return b;
     });
@@ -464,8 +456,6 @@ exports.acceptCounterBySeller = async (req, res) => {
 
     return res.json({ success: true, message: 'Counter accepted. Booking created.', data: { booking, bid } });
   } catch (err) {
-    if (err && err.statusCode === 402)
-      return res.status(402).json({ success: false, message: "The buyer's wallet balance is insufficient to fund this booking yet. Ask them to top up before accepting." });
     console.error('acceptCounterBySeller:', err);
     return res.status(500).json({ success: false, message: 'Server error' });
   }

@@ -24,14 +24,15 @@ const { registerFcmToken, clearFcmToken } = require('../../controllers/shared/fc
 const { listNotifications, getUnreadCount, markOneRead, markAllRead, deleteOne: deleteNotification } = require('../../controllers/shared/notification.controller');
 const {
   listMyJobs, getJob, createJob, updateJob, closeJob, deleteJob,
-  getJobBids, acceptBid, rejectBid, counterBid,
+  getJobBids, acceptBid, rejectBid, counterBid, getJobStats,
 } = require('../../controllers/buyer/job.controller');
 const { searchServices } = require('../../controllers/buyer/service.controller');
-const { listBookings, getBooking, createBooking, acceptWork, rejectWork, cancelBooking } = require('../../controllers/buyer/booking.controller');
+const { listBookings, getBooking, createBooking, acceptWork, rejectWork, cancelBooking, acceptMilestone, rejectMilestone } = require('../../controllers/buyer/booking.controller');
 const { createReview, listReviews } = require('../../controllers/buyer/review.controller');
 const { getStats: getBuyerStats }  = require('../../controllers/buyer/stats.controller');
 const { listFavourites, listFavouriteIds, addFavourite, removeFavourite } = require('../../controllers/buyer/favourite.controller');
 const { listReceivedOffers, acceptOffer, declineOffer } = require('../../controllers/shared/offer.controller');
+const { sendFeedback } = require('../../controllers/shared/feedback.controller');
 
 router.use(authenticate, authorize('BUYER'));
 
@@ -44,6 +45,7 @@ router.get   ('/preferences',     getPreferences);
 router.put   ('/preferences',     updatePreferences);
 router.put   ('/fcm-token',       registerFcmToken);
 router.delete('/fcm-token',       clearFcmToken);
+router.post  ('/feedback',        sendFeedback);
 
 // ── Notifications ──────────────────────────────────────────────────────
 router.get   ('/notifications',              listNotifications);
@@ -65,6 +67,8 @@ router.get   ('/bookings/:id',          getBooking);
 router.patch ('/bookings/:id/accept',   acceptWork);
 router.patch ('/bookings/:id/reject',   rejectWork);
 router.patch ('/bookings/:id/cancel',   cancelBooking);
+router.patch ('/bookings/:id/milestones/:milestoneId/accept', acceptMilestone);
+router.patch ('/bookings/:id/milestones/:milestoneId/reject', rejectMilestone);
 
 // ── Reviews ────────────────────────────────────────────────────────────
 router.get  ('/reviews', listReviews);
@@ -84,6 +88,7 @@ router.patch ('/offers/:id/decline', declineOffer);
 // ── Jobs ───────────────────────────────────────────────────────────────
 router.post  ('/jobs/upload',   docUpload.array('files', 5), uploadJobDocs);
 router.get   ('/jobs',          listMyJobs);
+router.get   ('/jobs/stats',    getJobStats);
 router.get   ('/jobs/:id',      getJob);
 router.post  ('/jobs',          createJob);
 router.put   ('/jobs/:id',      updateJob);

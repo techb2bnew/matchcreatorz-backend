@@ -2,9 +2,9 @@
 const { sequelize, Offer, Booking, Service, User } = require('../../models');
 const response = require('../../helpers/response.helper');
 const notify   = require('../../helpers/notification.helper');
-const wallet   = require('../../services/wallet/wallet.service');
+const env      = require('../../config/env');
 
-const FEE_PERCENT = 0.10;
+const FEE_PERCENT = (Number(env.PLATFORM_FEE_PERCENT) || 10) / 100;
 
 const INCLUDE = [
   { model: User,    as: 'seller',  attributes: ['id', 'name', 'email'] },
@@ -214,12 +214,16 @@ exports.acceptOffer = async (req, res, next) => {
     if (!offer) return response.notFound(res, 'Offer not found');
     if (offer.status !== 'pending')
       return response.badRequest(res, 'This offer is no longer pending');
+    if (offer.expires_at && new Date(offer.expires_at) < new Date()) {
+      await offer.update({ status: 'expired' });
+      return response.badRequest(res, 'This offer has expired');
+    }
 
     const amount = Number(offer.amount);
     const fee    = Math.round(amount * FEE_PERCENT * 100) / 100;
 
-    // Escrow: hold the offer amount from the buyer's wallet in the same
-    // transaction as booking creation (mirrors direct service bookings).
+    // No wallet charge here — payment is deferred until the seller actually
+    // submits work. Booking + offer updates still happen atomically.
     const booking = await sequelize.transaction(async (t) => {
       const b = await Booking.create({
         buyer_id:      offer.buyer_id,
@@ -230,13 +234,7 @@ exports.acceptOffer = async (req, res, next) => {
         platform_fee:  fee,
         delivery_days: offer.delivery_days || null,
         status:        'pending',
-        payment_status: 'held',
       }, { transaction: t });
-
-      await wallet.debit(offer.buyer_id, amount, {
-        type: 'booking_payment', booking_id: b.id,
-        note: `Payment held for booking #${b.id} — ${offer.title}`,
-      }, t);
 
       await offer.update({ status: 'accepted', booking_id: b.id }, { transaction: t });
 

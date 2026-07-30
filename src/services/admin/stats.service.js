@@ -1,6 +1,6 @@
 'use strict';
 const { Op, fn, col, literal } = require('sequelize');
-const { User, Booking, Service, Review, Job } = require('../../models');
+const { User, Booking, Service, Review, Job, SupportTicket } = require('../../models');
 const cache = require('../../helpers/cache.helper');
 
 exports.getDashboardStats = async () => {
@@ -19,6 +19,8 @@ exports.getDashboardStats = async () => {
     monthlyRevenue,
     totalJobs,
     openJobs,
+    newUsersToday,
+    openTickets,
   ] = await Promise.all([
     // Total users = buyers + sellers only (exclude ADMIN accounts)
     User.count({ where: { role: { [Op.in]: ['SELLER', 'BUYER'] } } }),
@@ -60,6 +62,10 @@ exports.getDashboardStats = async () => {
 
     Job.count({ paranoid: false }).catch(() => 0),
     Job.count({ where: { status: 'OPEN' }, paranoid: false }).catch(() => 0),
+    User.count({
+      where: { role: { [Op.in]: ['SELLER', 'BUYER'] }, createdAt: { [Op.gte]: literal("CURRENT_DATE") } },
+    }).catch(() => 0),
+    SupportTicket.count({ where: { status: { [Op.in]: ['OPEN', 'IN_PROGRESS'] } } }).catch(() => 0),
   ]);
 
   const result = {
@@ -74,6 +80,8 @@ exports.getDashboardStats = async () => {
       totalJobs,
       openJobs,
       totalRevenue: totalRevenue || 0,
+      newUsersToday,
+      openTickets,
     },
     recentBookings,
     monthlyRevenue: monthlyRevenue.map(r => ({

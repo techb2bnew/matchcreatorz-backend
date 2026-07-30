@@ -550,6 +550,21 @@ const sendReviewReceived = (to, sellerName, buyerName, rating, serviceName) => {
   });
 };
 
+// ── Feedback submitted → admin ──────────────────────────────────────────
+const escapeHtml = (s) => String(s || '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+const sendFeedbackReceived = (adminEmail, userName, userRole, subject, message) =>
+  sendMail({
+    to: adminEmail,
+    subject: `New Feedback${subject ? `: ${subject}` : ''} — from ${userName}`,
+    html: baseTemplate(`
+      <h2>New Feedback Received</h2>
+      <p><strong>${escapeHtml(userName)}</strong> (${escapeHtml(userRole)}) sent feedback${subject ? ` about <strong>"${escapeHtml(subject)}"</strong>` : ''}:</p>
+      <p style="background:#f9fafb;border-radius:12px;padding:16px;white-space:pre-wrap;">${escapeHtml(message)}</p>
+    `),
+  });
+
 module.exports = {
   sendWelcome,
   sendOtp,
@@ -573,4 +588,5 @@ module.exports = {
   sendDisputeRaised,
   sendBookingCancelled,
   sendReviewReceived,
+  sendFeedbackReceived,
 };
