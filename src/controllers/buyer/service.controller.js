@@ -2,7 +2,6 @@
 const { Op, literal }                    = require('sequelize');
 const { Service, User, Category }        = require('../../models');
 const response                           = require('../../helpers/response.helper');
-const { stripHtml }                      = require('../../helpers/text.helper');
 
 /**
  * @swagger
@@ -127,7 +126,6 @@ exports.searchServices = async (req, res) => {
     // Respect seller "Show Ratings" — hide rating on services whose seller opted out
     const data = rows.map((r) => {
       const j = r.toJSON();
-      j.description = stripHtml(j.description);   // clean preview in list
       const showRating = j.seller?.preferences?.privacy?.showRating;
       if (showRating === false) {
         j.rating = null;
