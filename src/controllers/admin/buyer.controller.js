@@ -31,14 +31,17 @@ const response     = require('../../helpers/response.helper');
  *       - in: query
  *         name: status
  *         schema: { type: string, enum: [active, inactive, banned] }
+ *       - in: query
+ *         name: approval_status
+ *         schema: { type: string, enum: [pending, approved, rejected] }
  *     responses:
  *       200:
  *         description: Buyers list
  */
 const listBuyers = async (req, res, next) => {
   try {
-    const { page, limit, search, status } = req.query;
-    const result = await buyerService.listBuyers({ page, limit, search, status });
+    const { page, limit, search, status, approval_status } = req.query;
+    const result = await buyerService.listBuyers({ page, limit, search, status, approval_status });
     return response.paginate(res, 'Buyers fetched', result.buyers, {
       page: result.page, limit: result.limit, total: result.total,
     });
@@ -148,6 +151,52 @@ const editBuyer = async (req, res, next) => {
 
 /**
  * @swagger
+ * /api/v1/admin/buyers/{id}/approve:
+ *   patch:
+ *     summary: Approve a pending buyer
+ *     tags: [Admin - Buyers]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: Buyer approved }
+ *       404: { description: Buyer not found }
+ */
+const approveBuyer = async (req, res, next) => {
+  try {
+    const data = await buyerService.approveBuyer(req.params.id);
+    return response.success(res, 'Buyer approved', data);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
+ * /api/v1/admin/buyers/{id}/reject:
+ *   patch:
+ *     summary: Reject a pending buyer
+ *     tags: [Admin - Buyers]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: Buyer rejected }
+ *       404: { description: Buyer not found }
+ */
+const rejectBuyer = async (req, res, next) => {
+  try {
+    const data = await buyerService.rejectBuyer(req.params.id);
+    return response.success(res, 'Buyer rejected', data);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
  * /api/v1/admin/buyers/{id}/block:
  *   patch:
  *     summary: Block buyer
@@ -198,4 +247,4 @@ const unblockBuyer = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { listBuyers, getBuyerById, addBuyer, editBuyer, blockBuyer, unblockBuyer };
+module.exports = { listBuyers, getBuyerById, addBuyer, editBuyer, approveBuyer, rejectBuyer, blockBuyer, unblockBuyer };

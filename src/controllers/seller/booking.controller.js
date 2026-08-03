@@ -142,6 +142,7 @@ exports.acceptOrder = async (req, res, next) => {
  *                     size: { type: integer }
  *               notes: { type: string, description: Message describing the delivered work }
  *               delivery_days: { type: integer, nullable: true, description: Updated/actual delivery duration in days (optional) }
+ *               hours_worked: { type: number, description: Required for hourly bookings — hours logged; total charged = hours * agreed rate }
  *     responses:
  *       200:
  *         description: Work submitted, awaiting buyer review

@@ -4,7 +4,7 @@ const { authenticate, authorize } = require('../../middlewares/auth.middleware')
 const multer = require('multer');
 
 const { listMyServices, getMyService, createService, updateService, deleteService, publishService, pauseService } = require('../../controllers/seller/service.controller');
-const { uploadResume } = require('../../controllers/seller/upload.controller');
+const { uploadResume, uploadBidAttachment } = require('../../controllers/seller/upload.controller');
 const { getSellerProfile, updateSellerProfile } = require('../../controllers/seller/profile.controller');
 const { changePassword, deleteAccount, getPreferences, updatePreferences } = require('../../controllers/shared/profile.controller');
 const { registerFcmToken, clearFcmToken } = require('../../controllers/shared/fcm.controller');
@@ -93,6 +93,7 @@ router.post  ('/bookings/:id/milestones',                createMilestones);
 router.patch ('/bookings/:id/milestones/:milestoneId/submit', submitMilestone);
 
 // ── Browse Jobs & Bidding ──────────────────────────────────────────────
+router.post  ('/bids/upload',    bookingUpload.single('file'), uploadBidAttachment);
 router.get   ('/bids',           myBids);
 router.get   ('/jobs',           browseJobs);
 router.get   ('/jobs/:id',       getJobDetail);

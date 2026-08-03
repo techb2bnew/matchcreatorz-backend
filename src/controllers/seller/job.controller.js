@@ -6,6 +6,7 @@ const { applyConnects, getBidCost } = require('../../helpers/connects.helper');
 const { stripHtml }               = require('../../helpers/text.helper');
 
 const FEE_PERCENT = 0.10;
+const MAX_BID_ATTACHMENTS = 5;
 
 // ── Browse open jobs ──────────────────────────────────────────────────
 /**
@@ -174,7 +175,7 @@ exports.placeBid = async (req, res) => {
     const existing = await Bid.findOne({ where: { job_id: job.id, seller_id: req.user.id } });
     if (existing) return res.status(400).json({ success: false, message: 'You have already bid on this job' });
 
-    const { amount, delivery_days, proposal } = req.body;
+    const { amount, delivery_days, proposal, attachments } = req.body;
     if (!amount || !delivery_days)
       return res.status(400).json({ success: false, message: 'Amount and delivery days are required' });
 
@@ -194,6 +195,7 @@ exports.placeBid = async (req, res) => {
       amount:        Number(amount),
       delivery_days: Number(delivery_days),
       proposal:      proposal || null,
+      attachments:   Array.isArray(attachments) ? attachments.slice(0, MAX_BID_ATTACHMENTS) : [],
       status:        'pending',
     });
 
@@ -256,7 +258,7 @@ exports.updateBid = async (req, res) => {
     const bid = await Bid.findOne({ where: { job_id: job.id, seller_id: req.user.id } });
     if (!bid) return res.status(404).json({ success: false, message: 'You have not bid on this job' });
 
-    const { amount, delivery_days, proposal } = req.body;
+    const { amount, delivery_days, proposal, attachments } = req.body;
     if (!amount || !delivery_days)
       return res.status(400).json({ success: false, message: 'Amount and delivery days are required' });
 
@@ -264,6 +266,8 @@ exports.updateBid = async (req, res) => {
       amount:        Number(amount),
       delivery_days: Number(delivery_days),
       proposal:      proposal || bid.proposal,
+      // Explicit [] must be respected so the seller can remove all attachments
+      attachments:   Array.isArray(attachments) ? attachments.slice(0, MAX_BID_ATTACHMENTS) : bid.attachments,
     });
 
     return res.json({ success: true, message: 'Bid updated successfully', data: bid });

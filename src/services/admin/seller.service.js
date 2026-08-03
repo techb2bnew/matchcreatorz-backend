@@ -28,13 +28,17 @@ const listSellers = async ({ page = 1, limit = 10, search, approval_status, stat
 
   const profileWhere = {};
   if (approval_status) profileWhere.approval_status = approval_status;
+  const hasProfileFilter = Object.keys(profileWhere).length > 0;
 
   const { rows } = await User.findAndCountAll({
     where:   userWhere,
     include: [{
       ...sellerInclude,
-      where:    Object.keys(profileWhere).length ? profileWhere : undefined,
-      required: false,
+      where:    hasProfileFilter ? profileWhere : undefined,
+      // required must flip to true when filtering by a profile field — with
+      // required:false, Sequelize puts the where into the JOIN's ON clause
+      // instead of filtering rows, so an INNER JOIN is needed to actually filter.
+      required: hasProfileFilter,
       paranoid: false,
     }],
     order:    [['createdAt', 'DESC']],

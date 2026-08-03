@@ -233,7 +233,9 @@ exports.acceptOffer = async (req, res, next) => {
         amount,
         platform_fee:  fee,
         delivery_days: offer.delivery_days || null,
-        status:        'pending',
+        // Straight to 'ongoing' — the seller already committed to these terms by
+        // sending the offer, so asking them to "Accept" again would be redundant.
+        status:        'ongoing',
       }, { transaction: t });
 
       await offer.update({ status: 'accepted', booking_id: b.id }, { transaction: t });

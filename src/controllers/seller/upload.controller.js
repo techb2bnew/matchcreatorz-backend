@@ -89,4 +89,41 @@ const uploadResume = async (req, res, next) => {
   }
 };
 
-module.exports = { uploadServiceImages, uploadResume };
+/**
+ * @swagger
+ * /api/v1/seller/bids/upload:
+ *   post:
+ *     summary: Upload a portfolio / work-sample file to attach to a bid (max 10 MB)
+ *     tags: [Seller - Jobs]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required: [file]
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *                 description: Image, PDF, DOC/DOCX, XLS/XLSX, TXT or ZIP (max 10 MB)
+ *     responses:
+ *       200:
+ *         description: Uploaded — returns { url, name, type, size } to store on the bid
+ *       400:
+ *         description: No file uploaded or unsupported file type
+ */
+const uploadBidAttachment = async (req, res, next) => {
+  try {
+    const file = req.file;
+    if (!file) return response.badRequest(res, 'No file uploaded');
+    const url = await uploadToS3(file, 'bids');
+    return response.success(res, 'File uploaded', {
+      url, name: file.originalname, type: file.mimetype, size: file.size,
+    });
+  } catch (err) { next(err); }
+};
+
+module.exports = { uploadServiceImages, uploadResume, uploadBidAttachment };

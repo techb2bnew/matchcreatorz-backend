@@ -135,6 +135,9 @@ exports.acceptWork = async (buyerId, id) => {
         note: `Platform fee from booking #${booking.id}`,
       }, t);
     }
+    if (booking.job_id) {
+      await Job.update({ status: 'COMPLETED' }, { where: { id: booking.job_id }, transaction: t });
+    }
   });
 
   // Notify seller work was accepted
@@ -209,6 +212,9 @@ exports.acceptMilestone = async (buyerId, id, milestoneId) => {
     });
     if (remaining === 0) {
       await booking.update({ status: 'completed', payment_status: 'released' }, { transaction: t });
+      if (booking.job_id) {
+        await Job.update({ status: 'COMPLETED' }, { where: { id: booking.job_id }, transaction: t });
+      }
     }
   });
 

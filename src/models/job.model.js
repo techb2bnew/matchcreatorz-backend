@@ -69,7 +69,7 @@ const Job = sequelize.define('Job', {
   },
 
   status: {
-    type:         DataTypes.ENUM('OPEN', 'IN_PROGRESS', 'CLOSED', 'CANCELLED'),
+    type:         DataTypes.ENUM('OPEN', 'IN_PROGRESS', 'COMPLETED', 'CLOSED', 'CANCELLED'),
     allowNull:    false,
     defaultValue: 'OPEN',
   },

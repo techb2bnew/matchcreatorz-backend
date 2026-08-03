@@ -4,7 +4,7 @@ const multer = require('multer');
 const { authenticate, authorize } = require('../../middlewares/auth.middleware');
 
 const { listSellers, getSellerById, addSeller, editSeller, approveSeller, rejectSeller, blockSeller, unblockSeller } = require('../../controllers/admin/seller.controller');
-const { listBuyers, getBuyerById, addBuyer, editBuyer, blockBuyer, unblockBuyer } = require('../../controllers/admin/buyer.controller');
+const { listBuyers, getBuyerById, addBuyer, editBuyer, approveBuyer, rejectBuyer, blockBuyer, unblockBuyer } = require('../../controllers/admin/buyer.controller');
 const { listCategories, getCategoryById, addCategory, editCategory, deleteCategory } = require('../../controllers/admin/category.controller');
 const { listServices, getServiceById, rejectService, restoreService, toggleFeatured, deleteService: deleteAdminService } = require('../../controllers/admin/service.controller');
 const { getProfile, updateProfile, changePassword } = require('../../controllers/shared/profile.controller');
@@ -61,6 +61,8 @@ router.get   ('/buyers',               listBuyers);
 router.post  ('/buyers',               addBuyer);
 router.get   ('/buyers/:id',           getBuyerById);
 router.put   ('/buyers/:id',           editBuyer);
+router.patch ('/buyers/:id/approve',   approveBuyer);
+router.patch ('/buyers/:id/reject',    rejectBuyer);
 router.patch ('/buyers/:id/block',     blockBuyer);
 router.patch ('/buyers/:id/unblock',   unblockBuyer);
 

@@ -482,7 +482,10 @@ exports.acceptBid = async (req, res) => {
     const effAmount   = bid.counter_amount != null ? Number(bid.counter_amount) : Number(bid.amount);
     const effDelivery = bid.counter_amount != null && bid.counter_delivery_days != null
       ? bid.counter_delivery_days : bid.delivery_days;
-    const fee = Math.round(effAmount * FEE_PERCENT * 100) / 100;
+    const isHourly = job.job_type === 'hourly';
+    // For hourly jobs, effAmount is the agreed $/hr rate — the total (and its fee)
+    // isn't known until the seller logs hours at submission time.
+    const fee = isHourly ? 0 : Math.round(effAmount * FEE_PERCENT * 100) / 100;
 
     // No wallet charge here — payment is deferred until the seller actually
     // submits work. The bid/job/booking updates still happen atomically.
@@ -508,8 +511,11 @@ exports.acceptBid = async (req, res) => {
         title:         job.title,
         amount:        effAmount,
         platform_fee:  fee,
+        job_type:      job.job_type || 'fixed',
         delivery_days: effDelivery,
-        status:        'pending',
+        // Straight to 'ongoing' — the seller already committed to these terms by
+        // bidding, so asking them to "Accept" again would be a redundant step.
+        status:        'ongoing',
       }, { transaction: t });
 
       return b;

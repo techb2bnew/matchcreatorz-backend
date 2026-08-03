@@ -33,6 +33,14 @@ const Bid = sequelize.define('Bid', {
     allowNull: true,
   },
 
+  // Portfolio / work samples the seller attaches to back up their proposal.
+  // Array of { url, name, type, size } — same shape as booking attachments.
+  attachments: {
+    type:         DataTypes.JSONB,
+    allowNull:    false,
+    defaultValue: [],
+  },
+
   status: {
     type:         DataTypes.ENUM('pending', 'countered', 'accepted', 'rejected'),
     allowNull:    false,

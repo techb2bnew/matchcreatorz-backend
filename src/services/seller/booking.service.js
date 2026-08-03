@@ -3,6 +3,9 @@ const { Op }                          = require('sequelize');
 const { sequelize, Booking, BookingMilestone, User, Service, Job } = require('../../models');
 const notify                          = require('../../helpers/notification.helper');
 const wallet                          = require('../wallet/wallet.service');
+const env                             = require('../../config/env');
+
+const FEE_PERCENT = (Number(env.PLATFORM_FEE_PERCENT) || 10) / 100;
 
 const INCLUDE = [
   { model: User,    as: 'buyer',   attributes: ['id', 'name'] },
@@ -53,7 +56,7 @@ exports.acceptOrder = async (sellerId, id) => {
   return booking;
 };
 
-exports.submitWork = async (sellerId, id, { attachments, notes, delivery_days } = {}) => {
+exports.submitWork = async (sellerId, id, { attachments, notes, delivery_days, hours_worked } = {}) => {
   const booking = await Booking.findOne({ where: { id, seller_id: sellerId } });
   if (!booking) throw Object.assign(new Error('Booking not found'), { status: 404 });
   if (!['ongoing', 'in_dispute'].includes(booking.status))
@@ -63,14 +66,34 @@ exports.submitWork = async (sellerId, id, { attachments, notes, delivery_days } 
   if (milestoneCount > 0)
     throw Object.assign(new Error('This booking uses milestones — submit each milestone individually'), { status: 400 });
 
-  // No wallet charge here — the buyer is only charged (and the escrow released
-  // to the seller, in one step) when they click Accept.
-  await booking.update({
+  const patch = {
     status: 'amidst_completion',
     attachments: Array.isArray(attachments) ? attachments : booking.attachments,
     submission_notes: notes || booking.submission_notes,
     delivery_days: delivery_days ? Math.max(1, Math.round(Number(delivery_days))) : booking.delivery_days,
-  });
+  };
+
+  if (booking.job_type === 'hourly') {
+    const hours = Number(hours_worked);
+    if (!hours || hours <= 0)
+      throw Object.assign(new Error('hours_worked is required for hourly bookings'), { status: 400 });
+
+    // `amount` holds the agreed $/hr rate until first submission, after which it
+    // holds the computed total — recover the rate algebraically on resubmission
+    // (e.g. after a dispute) instead of needing a separate rate column.
+    const rate = booking.hours_worked != null
+      ? Number(booking.amount) / Number(booking.hours_worked)
+      : Number(booking.amount);
+
+    const total = wallet.round2(hours * rate);
+    patch.amount        = total;
+    patch.platform_fee  = wallet.round2(total * FEE_PERCENT);
+    patch.hours_worked  = hours;
+  }
+
+  // No wallet charge here — the buyer is only charged (and the escrow released
+  // to the seller, in one step) when they click Accept.
+  await booking.update(patch);
   // Notify buyer that work has been (re)submitted for review
   const buyer = await User.findByPk(booking.buyer_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
   if (buyer) notify.workSubmitted(buyer, booking);
@@ -87,6 +110,8 @@ exports.createMilestones = async (sellerId, id, milestones) => {
   if (!booking) throw Object.assign(new Error('Booking not found'), { status: 404 });
   if (!['ongoing', 'in_dispute'].includes(booking.status))
     throw Object.assign(new Error('Booking must be ongoing to set up milestones'), { status: 400 });
+  if (booking.job_type === 'hourly')
+    throw Object.assign(new Error('Hourly bookings don\'t support milestones — submit hours as a single delivery'), { status: 400 });
 
   const existing = await BookingMilestone.count({ where: { booking_id: booking.id } });
   if (existing > 0)
@@ -147,8 +172,10 @@ exports.submitMilestone = async (sellerId, id, milestoneId, { attachments, notes
 exports.cancelBooking = async (sellerId, id, cancel_reason) => {
   const booking = await Booking.findOne({ where: { id, seller_id: sellerId } });
   if (!booking) throw Object.assign(new Error('Booking not found'), { status: 404 });
-  if (booking.status !== 'pending')
-    throw Object.assign(new Error('Only pending bookings can be cancelled by seller'), { status: 400 });
+  // 'ongoing' is included because bid/offer-sourced bookings now skip 'pending'
+  // entirely — without this the seller would have no way to back out at all.
+  if (!['pending', 'ongoing'].includes(booking.status))
+    throw Object.assign(new Error('Cannot cancel booking at this stage'), { status: 400 });
 
   // Refund the held escrow back to the buyer.
   await sequelize.transaction(async (t) => {

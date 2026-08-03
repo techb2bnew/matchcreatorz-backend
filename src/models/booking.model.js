@@ -47,6 +47,23 @@ const Booking = sequelize.define('Booking', {
     defaultValue: 0,
   },
 
+  // Denormalized copy of the originating job's type (services are always 'fixed').
+  // Drives hourly-billing behavior: for 'hourly' bookings, `amount` holds the
+  // agreed $/hr rate until the seller submits work with `hours_worked`, at
+  // which point `amount` is overwritten with the computed total (hours * rate).
+  job_type: {
+    type:         DataTypes.STRING(20),
+    allowNull:    false,
+    defaultValue: 'fixed',
+  },
+
+  // Hours the seller logged at submission time (hourly bookings only).
+  // Null until submitted; once set, `amount` is the computed total, not the rate.
+  hours_worked: {
+    type:      DataTypes.DECIMAL(10, 2),
+    allowNull: true,
+  },
+
   status: {
     type:         DataTypes.ENUM('pending', 'ongoing', 'amidst_completion', 'completed', 'cancelled', 'in_dispute'),
     allowNull:    false,

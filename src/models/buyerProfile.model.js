@@ -38,6 +38,14 @@ const BuyerProfile = sequelize.define('BuyerProfile', {
     allowNull: true,
   },
 
+  // Default 'approved' protects existing rows when this column is added via
+  // migration/alter — new signups explicitly pass 'pending' at creation time.
+  approval_status: {
+    type:         DataTypes.ENUM('pending', 'approved', 'rejected'),
+    allowNull:    false,
+    defaultValue: 'approved',
+  },
+
 }, {
   tableName:  'buyer_profiles',
   timestamps: true,

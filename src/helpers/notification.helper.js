@@ -130,6 +130,20 @@ const sellerUnblocked = (seller) => notifyUser(seller, {
 // ADMIN → BUYER
 // ─────────────────────────────────────────────────────────────────────────────
 
+const buyerApproved = (buyer) => notifyUser(buyer, {
+  type: 'buyer_approved', title: 'Account Approved! 🎉',
+  body: 'Congratulations! Your buyer account has been approved. Start posting jobs now.',
+  data: { type: 'buyer_approved' },
+  email: () => email.sendBuyerApproved(buyer.email, buyer.name),
+});
+
+const buyerRejected = (buyer) => notifyUser(buyer, {
+  type: 'buyer_rejected', title: 'Account Update',
+  body: 'Your buyer account application has been reviewed. Please check your email for details.',
+  data: { type: 'buyer_rejected' },
+  email: () => email.sendBuyerRejected(buyer.email, buyer.name),
+});
+
 const buyerBlocked = (buyer) => notifyUser(buyer, {
   type: 'account_blocked', title: 'Account Suspended',
   body: 'Your account has been suspended. Contact support for assistance.',
@@ -368,6 +382,14 @@ const sellerRegistered = (seller) => notifyAdmins({
   data:  { type: 'seller_registered', seller_id: String(seller.id) },
 });
 
+// New buyer signed up → awaiting admin approval
+const buyerRegistered = (buyer) => notifyAdmins({
+  type:  'buyer_registered',
+  title: 'New Buyer Signup',
+  body:  `${buyer.name} registered as a buyer and is awaiting approval.`,
+  data:  { type: 'buyer_registered', buyer_id: String(buyer.id) },
+});
+
 // User submitted feedback from Settings → Send Feedback
 const feedbackReceived = (userName, feedback) => notifyAdmins({
   type:  'feedback_received',
@@ -385,6 +407,8 @@ module.exports = {
   sellerBlocked,
   sellerUnblocked,
   // admin → buyer
+  buyerApproved,
+  buyerRejected,
   buyerBlocked,
   buyerUnblocked,
   // bids
@@ -421,5 +445,6 @@ module.exports = {
   withdrawalRequested,
   disputeRaisedAdmin,
   sellerRegistered,
+  buyerRegistered,
   feedbackReceived,
 };

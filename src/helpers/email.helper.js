@@ -404,6 +404,31 @@ const sendSellerRejected = (to, name) =>
     `),
   });
 
+// ── Buyer account approved by admin ────────────────────────────────────
+const sendBuyerApproved = (to, name) =>
+  sendMail({
+    to,
+    subject: 'Your buyer account has been approved! 🎉',
+    html: baseTemplate(`
+      <h2>Account Approved! 🎉</h2>
+      <p>Hi ${name}, great news! Your MatchCreatorz buyer account has been <strong style="color:#16a34a;">approved</strong> by our team.</p>
+      <p>You can now post jobs, browse creators, and start hiring.</p>
+      <a class="btn" href="${env.CLIENT_URL}/buyer/dashboard">Go to Dashboard</a>
+    `),
+  });
+
+// ── Buyer account rejected by admin ────────────────────────────────────
+const sendBuyerRejected = (to, name) =>
+  sendMail({
+    to,
+    subject: 'Update on your MatchCreatorz buyer application',
+    html: baseTemplate(`
+      <h2>Application Status Update</h2>
+      <p>Hi ${name}, after reviewing your buyer account application, our team has decided not to approve it at this time.</p>
+      <p>You can <a href="mailto:support@matchcreatorz.com" style="color:#e84545;">contact support</a> for more information.</p>
+    `),
+  });
+
 // ── Account blocked ─────────────────────────────────────────────────────
 const sendAccountBlocked = (to, name, role) =>
   sendMail({
@@ -577,6 +602,8 @@ module.exports = {
   // new
   sendSellerApproved,
   sendSellerRejected,
+  sendBuyerApproved,
+  sendBuyerRejected,
   sendAccountBlocked,
   sendAccountUnblocked,
   sendBidWithdrawn,

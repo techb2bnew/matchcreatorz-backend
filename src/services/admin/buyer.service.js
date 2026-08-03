@@ -8,11 +8,11 @@ const notify                 = require('../../helpers/notification.helper');
 const buyerInclude = {
   model:      BuyerProfile,
   as:         'buyerProfile',
-  attributes: ['id','company_name','city','country','profile_image'],
+  attributes: ['id','company_name','city','country','profile_image','approval_status'],
 };
 
 // ── List buyers ───────────────────────────────────────────────────────
-const listBuyers = async ({ page = 1, limit = 10, search, status, deleted }) => {
+const listBuyers = async ({ page = 1, limit = 10, search, approval_status, status, deleted }) => {
   const offset = (page - 1) * limit;
 
   const userWhere = { role: 'BUYER' };
@@ -24,9 +24,21 @@ const listBuyers = async ({ page = 1, limit = 10, search, status, deleted }) => 
 
   const showDeleted = deleted === true || deleted === 'true';
 
+  const profileWhere = {};
+  if (approval_status) profileWhere.approval_status = approval_status;
+  const hasProfileFilter = Object.keys(profileWhere).length > 0;
+
   const { rows } = await User.findAndCountAll({
     where:    userWhere,
-    include:  [{ ...buyerInclude, paranoid: false, required: false }],
+    include:  [{
+      ...buyerInclude,
+      where:    hasProfileFilter ? profileWhere : undefined,
+      paranoid: false,
+      // required must flip to true when filtering by a profile field — with
+      // required:false, Sequelize puts the where into the JOIN's ON clause
+      // instead of filtering rows, so an INNER JOIN is needed to actually filter.
+      required: hasProfileFilter,
+    }],
     order:    [['createdAt', 'DESC']],
     paranoid: false,   // fetch ALL, filter in JS
     distinct: true,
@@ -111,6 +123,30 @@ const editBuyer = async (id, data) => {
   return getBuyerById(id);
 };
 
+// ── Approve buyer ─────────────────────────────────────────────────────
+const approveBuyer = async (id) => {
+  const user = await User.findOne({ where: { id, role: 'BUYER' }, include: [buyerInclude] });
+  if (!user) throw { statusCode: 404, message: 'Buyer not found' };
+  if (!user.buyerProfile) throw { statusCode: 400, message: 'Buyer profile not found' };
+
+  await user.buyerProfile.update({ approval_status: 'approved' });
+  await user.update({ status: 'active' });
+  notify.buyerApproved(user);
+  return { approval_status: 'approved' };
+};
+
+// ── Reject buyer ──────────────────────────────────────────────────────
+const rejectBuyer = async (id) => {
+  const user = await User.findOne({ where: { id, role: 'BUYER' }, include: [buyerInclude] });
+  if (!user) throw { statusCode: 404, message: 'Buyer not found' };
+  if (!user.buyerProfile) throw { statusCode: 400, message: 'Buyer profile not found' };
+
+  await user.buyerProfile.update({ approval_status: 'rejected' });
+  await user.update({ status: 'inactive' });   // block login on rejection
+  notify.buyerRejected(user);
+  return { approval_status: 'rejected' };
+};
+
 // ── Block buyer ───────────────────────────────────────────────────────
 const blockBuyer = async (id) => {
   const user = await User.findOne({ where: { id, role: 'BUYER' } });
@@ -147,4 +183,4 @@ const formatBuyer = (user, bookingsCount = 0, totalSpent = 0) => ({
   total_spent:    totalSpent,
 });
 
-module.exports = { listBuyers, getBuyerById, addBuyer, editBuyer, blockBuyer, unblockBuyer };
+module.exports = { listBuyers, getBuyerById, addBuyer, editBuyer, approveBuyer, rejectBuyer, blockBuyer, unblockBuyer };

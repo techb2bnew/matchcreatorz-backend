@@ -92,11 +92,12 @@ const register = async (data) => {
     });
   } else if (role === 'BUYER') {
     await BuyerProfile.create({
-      user_id:       user.id,
-      company_name:  company_name  || null,
-      city:          city          || null,
-      country:       country       || null,
-      profile_image: profile_image || null,
+      user_id:         user.id,
+      company_name:    company_name  || null,
+      city:            city          || null,
+      country:         country       || null,
+      profile_image:   profile_image || null,
+      approval_status: 'pending',
     });
   }
 
@@ -113,6 +114,7 @@ const register = async (data) => {
   // Fire-and-forget — don't fail registration if notifications fail
   notify.welcome(user);
   if (role === 'SELLER') notify.sellerRegistered(user);
+  if (role === 'BUYER')  notify.buyerRegistered(user);
 
   sendOtp(user.email, user.name, otp).catch(err =>
     console.error('⚠️  OTP email failed:', err.message)
@@ -164,6 +166,17 @@ const login = async ({ email, phone, password }) => {
     }
     if (profile && profile.approval_status === 'pending') {
       throw { statusCode: 403, message: 'Your seller account is pending admin approval' };
+    }
+  }
+
+  // For buyers — same approval gate as sellers
+  if (user.role === 'BUYER') {
+    const profile = await BuyerProfile.findOne({ where: { user_id: user.id } });
+    if (profile && profile.approval_status === 'rejected') {
+      throw { statusCode: 403, message: 'Your buyer account has been rejected by admin' };
+    }
+    if (profile && profile.approval_status === 'pending') {
+      throw { statusCode: 403, message: 'Your buyer account is pending admin approval' };
     }
   }
 
@@ -386,8 +399,8 @@ const resetPassword = async ({ token, password }) => {
 //  2. We verify it against GOOGLE_CLIENT_ID.
 //  3. Existing user → normal login (returns token).
 //     New user WITHOUT role → { isNew:true, profile } so the UI can ask role.
-//     New user WITH role → create account. BUYER logs in immediately;
-//     SELLER is created pending admin approval (no token yet).
+//     New user WITH role → create account, pending admin approval either way
+//     (no token yet).
 const googleAuth = async ({ credential, role }) => {
   if (!env.GOOGLE_CLIENT_ID)
     throw { statusCode: 500, message: 'Google login is not configured on the server' };
@@ -423,6 +436,13 @@ const googleAuth = async ({ credential, role }) => {
         throw { statusCode: 403, message: 'Your seller account has been rejected by admin' };
       if (profile && profile.approval_status === 'pending')
         throw { statusCode: 403, message: 'Your seller account is pending admin approval' };
+    }
+    if (user.role === 'BUYER') {
+      const profile = await BuyerProfile.findOne({ where: { user_id: user.id } });
+      if (profile && profile.approval_status === 'rejected')
+        throw { statusCode: 403, message: 'Your buyer account has been rejected by admin' };
+      if (profile && profile.approval_status === 'pending')
+        throw { statusCode: 403, message: 'Your buyer account is pending admin approval' };
     }
 
     const token = signToken({ id: user.id, email: user.email, role: user.role });
@@ -463,12 +483,13 @@ const googleAuth = async ({ credential, role }) => {
     };
   }
 
-  // BUYER → create profile + log in immediately
-  await BuyerProfile.create({ user_id: user.id }).catch(() => {});
-  const token = signToken({ id: user.id, email: user.email, role: user.role });
+  // BUYER → pending approval, same as seller — no token yet
+  await BuyerProfile.create({ user_id: user.id, approval_status: 'pending' }).catch(() => {});
+  notify.buyerRegistered(user);
   return {
-    token, role: user.role,
-    user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role, is_verified: user.is_verified },
+    isNew: false,
+    pendingApproval: true,
+    message: 'Buyer account created. It is pending admin approval before you can sign in.',
   };
 };
 
@@ -480,8 +501,8 @@ const googleAuth = async ({ credential, role }) => {
 //  2. We verify the token against Apple's public keys + our client id(s).
 //  3. Existing user → normal login (returns token).
 //     New user WITHOUT role → { isNew:true, profile } so the UI can ask role.
-//     New user WITH role → create account. BUYER logs in immediately;
-//     SELLER is created pending admin approval (no token yet).
+//     New user WITH role → create account, pending admin approval either way
+//     (no token yet).
 const appleAuth = async ({ identity_token, id_token, user: appleUser, role }) => {
   const token = identity_token || id_token;
   if (!env.APPLE_CLIENT_ID)
@@ -528,6 +549,13 @@ const appleAuth = async ({ identity_token, id_token, user: appleUser, role }) =>
       if (profile && profile.approval_status === 'pending')
         throw { statusCode: 403, message: 'Your seller account is pending admin approval' };
     }
+    if (user.role === 'BUYER') {
+      const profile = await BuyerProfile.findOne({ where: { user_id: user.id } });
+      if (profile && profile.approval_status === 'rejected')
+        throw { statusCode: 403, message: 'Your buyer account has been rejected by admin' };
+      if (profile && profile.approval_status === 'pending')
+        throw { statusCode: 403, message: 'Your buyer account is pending admin approval' };
+    }
 
     const signedToken = signToken({ id: user.id, email: user.email, role: user.role });
     return {
@@ -565,12 +593,13 @@ const appleAuth = async ({ identity_token, id_token, user: appleUser, role }) =>
     };
   }
 
-  // BUYER → create profile + log in immediately
-  await BuyerProfile.create({ user_id: user.id }).catch(() => {});
-  const signedToken = signToken({ id: user.id, email: user.email, role: user.role });
+  // BUYER → pending approval, same as seller — no token yet
+  await BuyerProfile.create({ user_id: user.id, approval_status: 'pending' }).catch(() => {});
+  notify.buyerRegistered(user);
   return {
-    token: signedToken, role: user.role,
-    user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role, is_verified: user.is_verified },
+    isNew: false,
+    pendingApproval: true,
+    message: 'Buyer account created. It is pending admin approval before you can sign in.',
   };
 };
 
