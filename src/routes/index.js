@@ -10,5 +10,6 @@ router.use('/support',    require('./support'));
 router.use('/wallet',     require('./wallet'));
 router.use('/categories', require('./categories'));
 router.use('/public',     require('./publicStats'));
+router.use('/pages',      require('./pages'));
 
 module.exports = router;

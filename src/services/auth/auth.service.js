@@ -58,9 +58,16 @@ const register = async (data) => {
     company_name,
   } = data;
 
-  // 1. Check duplicate email
-  const existing = await User.findOne({ where: { email } });
-  if (existing) throw { statusCode: 409, message: 'Email already registered' };
+  // 1. Check duplicate email — paranoid:false so a soft-deleted account with
+  // this email is also caught here (the "email already registered" branch
+  // would otherwise miss it, since deleted rows are excluded by default, and
+  // User.create would instead fail with a raw DB unique-constraint error).
+  const existing = await User.findOne({ where: { email }, paranoid: false });
+  if (existing) {
+    if (existing.deletedAt || existing.deleted_at)
+      throw { statusCode: 409, message: 'This account has been deleted. Please contact support if you think this is a mistake.' };
+    throw { statusCode: 409, message: 'Email already registered' };
+  }
 
   // 2. Hash password
   const hashed = await bcrypt.hash(password, 12);
@@ -426,7 +433,7 @@ const googleAuth = async ({ credential, role }) => {
 
   if (user) {
     if (user.deletedAt || user.deleted_at)
-      throw { statusCode: 403, message: 'This account has been deleted.' };
+      throw { statusCode: 403, message: 'This account has been deleted. Please contact support if you think this is a mistake.' };
     if (user.status === 'banned')   throw { statusCode: 403, message: 'Account is banned' };
     if (user.status === 'inactive') throw { statusCode: 403, message: 'Account is inactive' };
 
@@ -538,7 +545,7 @@ const appleAuth = async ({ identity_token, id_token, user: appleUser, role }) =>
 
   if (user) {
     if (user.deletedAt || user.deleted_at)
-      throw { statusCode: 403, message: 'This account has been deleted.' };
+      throw { statusCode: 403, message: 'This account has been deleted. Please contact support if you think this is a mistake.' };
     if (user.status === 'banned')   throw { statusCode: 403, message: 'Account is banned' };
     if (user.status === 'inactive') throw { statusCode: 403, message: 'Account is inactive' };
 

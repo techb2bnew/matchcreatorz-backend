@@ -24,6 +24,7 @@ const ensureSeeded = async () => {
   const missing = DEFAULT_PAGES.filter((p) => !existingSlugs.has(p.slug));
   if (missing.length) await Page.bulkCreate(missing);
 };
+exports.ensureSeeded = ensureSeeded; // reused by the public (no-auth) pages route
 
 /**
  * @swagger

@@ -13,7 +13,7 @@
  * and are always delivered.
  */
 
-const { sendPush, sendWebPush } = require('./firebase.helper');
+const { sendPush, sendWebPush, sendMulticastPush } = require('./firebase.helper');
 const email                     = require('./email.helper');
 const { Notification, User }    = require('../models');
 
@@ -398,6 +398,33 @@ const feedbackReceived = (userName, feedback) => notifyAdmins({
   data:  { type: 'feedback_received', feedback_id: String(feedback.id) },
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN → BROADCAST  (announcement fanned out to a whole audience)
+// Always delivered (no preference gate) — same tier as account-status events.
+// Bulk-inserts the in-app inbox row in one query, then fans out push: web
+// tokens one at a time (no multicast API for Web Push), mobile tokens via
+// FCM's multicast endpoint in chunks of 500 (its per-request cap).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MULTICAST_CHUNK = 500;
+
+const broadcastAnnouncement = async (users, { title, body, data = {} } = {}) => {
+  if (!Array.isArray(users) || !users.length) return;
+
+  await ff(Notification.bulkCreate(
+    users.map((u) => ({ user_id: u.id, title, body, type: 'broadcast', data }))
+  ));
+
+  const webTokens    = users.map((u) => u.web_fcm_token).filter(Boolean);
+  const mobileTokens = users.map((u) => u.mobile_fcm_token).filter(Boolean);
+
+  await ff(Promise.all(webTokens.map((t) => sendWebPush(t, title, body, data))));
+
+  for (let i = 0; i < mobileTokens.length; i += MULTICAST_CHUNK) {
+    await ff(sendMulticastPush(mobileTokens.slice(i, i + MULTICAST_CHUNK), title, body, data));
+  }
+};
+
 module.exports = {
   // auth
   welcome,
@@ -447,4 +474,6 @@ module.exports = {
   sellerRegistered,
   buyerRegistered,
   feedbackReceived,
+  // broadcast
+  broadcastAnnouncement,
 };

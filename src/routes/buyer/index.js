@@ -23,7 +23,7 @@ const { getProfile, updateProfile, changePassword, deleteAccount, getPreferences
 const { registerFcmToken, clearFcmToken } = require('../../controllers/shared/fcm.controller');
 const { listNotifications, getUnreadCount, markOneRead, markAllRead, deleteOne: deleteNotification } = require('../../controllers/shared/notification.controller');
 const {
-  listMyJobs, getJob, createJob, updateJob, closeJob, deleteJob,
+  listMyJobs, getJob, createJob, updateJob, closeJob, completeJob, deleteJob,
   getJobBids, acceptBid, rejectBid, counterBid, getJobStats,
 } = require('../../controllers/buyer/job.controller');
 const { searchServices } = require('../../controllers/buyer/service.controller');
@@ -93,6 +93,7 @@ router.get   ('/jobs/:id',      getJob);
 router.post  ('/jobs',          createJob);
 router.put   ('/jobs/:id',      updateJob);
 router.patch ('/jobs/:id/close',              closeJob);
+router.patch ('/jobs/:id/complete',           completeJob);
 router.delete('/jobs/:id',                    deleteJob);
 router.get   ('/jobs/:id/bids',               getJobBids);
 router.patch ('/jobs/:id/bids/:bidId/accept',  acceptBid);

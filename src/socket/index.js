@@ -4,6 +4,7 @@ const jwt        = require('jsonwebtoken');
 const env        = require('../config/env');
 const chat       = require('../services/chat/chat.service');
 const emitter    = require('./emitter');
+const { User }   = require('../models');
 
 // userId -> Set<socketId>  (multi-device presence tracking)
 const online = new Map();
@@ -26,12 +27,22 @@ const initSocket = (server) => {
   emitter.setIO(io);
 
   // ── Auth: verify JWT from handshake (auth.token or Authorization header) ────
-  io.use((socket, next) => {
+  // Same live-account check as the REST authenticate middleware — a deleted
+  // or banned user shouldn't be able to open (or keep) a chat connection just
+  // because their old JWT hasn't expired yet.
+  io.use(async (socket, next) => {
     const raw = socket.handshake.auth?.token
       || (socket.handshake.headers?.authorization || '').replace(/^Bearer\s+/i, '');
     if (!raw) return next(new Error('Auth token missing'));
     try {
-      socket.user = jwt.verify(raw, env.JWT_SECRET); // { id, email, role }
+      const decoded = jwt.verify(raw, env.JWT_SECRET); // { id, email, role }
+
+      const user = await User.findByPk(decoded.id, { attributes: ['id', 'status'], paranoid: false });
+      if (!user || user.deletedAt || user.deleted_at) return next(new Error('This account no longer exists'));
+      if (user.status === 'banned')   return next(new Error('This account has been suspended'));
+      if (user.status === 'inactive') return next(new Error('This account is inactive'));
+
+      socket.user = decoded;
       return next();
     } catch {
       return next(new Error('Invalid or expired token'));

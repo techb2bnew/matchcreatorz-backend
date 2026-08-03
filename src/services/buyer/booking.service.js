@@ -1,6 +1,6 @@
 'use strict';
 const { Op }                          = require('sequelize');
-const { sequelize, Booking, BookingMilestone, User, Service, Job } = require('../../models');
+const { sequelize, Booking, BookingMilestone, User, Service, Job, Review } = require('../../models');
 const notify                          = require('../../helpers/notification.helper');
 const wallet                          = require('../wallet/wallet.service');
 const env                             = require('../../config/env');
@@ -23,6 +23,9 @@ const INCLUDE = [
   { model: Service, as: 'service', attributes: ['id', 'title', 'images'], required: false },
   { model: Job,     as: 'job',     attributes: ['id', 'title'],           required: false },
   { model: BookingMilestone, as: 'milestones', required: false, separate: true, order: [['position', 'ASC']] },
+  // Lets the frontend know a booking is already reviewed without relying on
+  // session-local state (which resets on reload and can't tell truth from guess).
+  { model: Review, as: 'review', attributes: ['id', 'rating'], required: false },
 ];
 
 const STATUS_MAP = {

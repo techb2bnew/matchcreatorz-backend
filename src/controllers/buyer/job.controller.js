@@ -299,6 +299,50 @@ exports.closeJob = async (req, res) => {
   }
 };
 
+// ── Mark job completed (manual) ──────────────────────────────────────────
+// Normally a job flips to COMPLETED automatically the moment the buyer accepts
+// the linked booking's delivered work (see buyer/booking.service.js acceptWork /
+// acceptMilestone). This is a manual fallback for the buyer's own record-keeping
+// — e.g. the booking link is stale, or the work was otherwise finished — so it
+// only ever touches the Job row, never wallet/booking/payment state.
+/**
+ * @swagger
+ * /api/v1/buyer/jobs/{id}/complete:
+ *   patch:
+ *     summary: Manually mark an in-progress job as completed
+ *     description: |
+ *       Only changes the job's own status — it does NOT release payment or touch
+ *       the linked booking. If the seller's delivered work hasn't been accepted
+ *       yet, do that from Bookings first so the seller actually gets paid.
+ *     tags: [Buyer - Jobs]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Job marked completed
+ *       400:
+ *         description: Job is not in progress
+ *       404:
+ *         description: Job not found
+ */
+exports.completeJob = async (req, res) => {
+  try {
+    const job = await Job.findOne({ where: { id: req.params.id, buyer_id: req.user.id } });
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+    if (job.status !== 'IN_PROGRESS')
+      return res.status(400).json({ success: false, message: 'Only an in-progress job can be marked completed' });
+    await job.update({ status: 'COMPLETED' });
+    return res.json({ success: true, message: 'Job marked as completed', data: job });
+  } catch (err) {
+    console.error('completeJob:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
 // ── Delete job ────────────────────────────────────────────────────────
 /**
  * @swagger

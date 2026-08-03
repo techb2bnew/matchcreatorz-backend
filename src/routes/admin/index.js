@@ -18,6 +18,8 @@ const { listNotifications, getUnreadCount, markOneRead, markAllRead, deleteOne }
 const { registerFcmToken, clearFcmToken } = require('../../controllers/shared/fcm.controller');
 const { listBanners, createBanner, updateBanner, deleteBanner } = require('../../controllers/admin/banner.controller');
 const { listPages, updatePage } = require('../../controllers/admin/page.controller');
+const { listReportTypes, getReport, exportReport } = require('../../controllers/admin/report.controller');
+const { sendBroadcast, listBroadcasts } = require('../../controllers/admin/broadcast.controller');
 
 const imageUpload = multer({
   storage: multer.memoryStorage(),
@@ -119,5 +121,14 @@ router.delete('/banners/:id',  deleteBanner);
 // ── Static Pages ───────────────────────────────────────────────────────
 router.get ('/pages',      listPages);
 router.put ('/pages/:id',  updatePage);
+
+// ── Reports ────────────────────────────────────────────────────────────
+router.get('/reports/types',        listReportTypes);
+router.get('/reports/:type/export', exportReport);
+router.get('/reports/:type',        getReport);
+
+// ── Broadcast ──────────────────────────────────────────────────────────
+router.post('/broadcasts', sendBroadcast);
+router.get ('/broadcasts', listBroadcasts);
 
 module.exports = router;

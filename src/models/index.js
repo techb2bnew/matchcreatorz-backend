@@ -25,6 +25,7 @@ const Withdrawal         = require('./withdrawal.model');
 const Feedback           = require('./feedback.model');
 const Banner             = require('./banner.model');
 const Page               = require('./page.model');
+const Broadcast          = require('./broadcast.model');
 
 // ── Associations ──────────────────────────────────────────
 
@@ -143,6 +144,10 @@ Withdrawal.belongsTo(User, { foreignKey: 'seller_id', as: 'seller' });
 User.hasMany(Feedback, { foreignKey: 'user_id', as: 'feedback' });
 Feedback.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
+// Broadcasts (admin → seller/buyer announcements)
+User.hasMany(Broadcast, { foreignKey: 'admin_id', as: 'broadcasts' });
+Broadcast.belongsTo(User, { foreignKey: 'admin_id', as: 'admin' });
+
 // ─────────────────────────────────────────────────────────
 
 const db = {
@@ -172,6 +177,7 @@ const db = {
   Feedback,
   Banner,
   Page,
+  Broadcast,
 };
 
 module.exports = db;
