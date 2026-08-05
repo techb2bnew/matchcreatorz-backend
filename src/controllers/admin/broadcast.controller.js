@@ -43,6 +43,16 @@ const response = require('../../helpers/response.helper');
  *       - in: query
  *         name: limit
  *         schema: { type: integer, default: 20 }
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *         description: Search by title or message body
+ *       - in: query
+ *         name: sortBy
+ *         schema: { type: string, enum: [title, audience, recipients, date, sentBy], default: date }
+ *       - in: query
+ *         name: sortDir
+ *         schema: { type: string, enum: [asc, desc], default: desc }
  *     responses:
  *       200:
  *         description: Paginated broadcast history

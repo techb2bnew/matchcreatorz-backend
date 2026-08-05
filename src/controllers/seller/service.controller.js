@@ -28,6 +28,7 @@ const { uploadToS3 } = require('../../helpers/s3.helper');
  *       - in: query
  *         name: search
  *         schema: { type: string }
+ *         description: Searches title, description, tags, and category name
  *       - in: query
  *         name: status
  *         schema: { type: string, enum: [active, paused, rejected] }

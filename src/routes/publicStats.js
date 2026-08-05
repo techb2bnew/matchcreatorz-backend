@@ -1,7 +1,7 @@
 'use strict';
 const router = require('express').Router();
 const { Op, fn, col } = require('sequelize');
-const { User, SellerProfile, Review, Bid, Job, Page } = require('../models/index');
+const { User, SellerProfile, Review, Bid, Job, Booking, Page } = require('../models/index');
 const response = require('../helpers/response.helper');
 const cache    = require('../helpers/cache.helper');
 
@@ -13,7 +13,7 @@ const cache    = require('../helpers/cache.helper');
  *
  * /api/v1/public/stats:
  *   get:
- *     summary: Platform-wide stats (creators, average rating, satisfaction, avg bids per job)
+ *     summary: Platform-wide stats (creators, projects, average rating, satisfaction, avg bids per job)
  *     tags: [Platform Stats (Public)]
  *     security: []
  *     responses:
@@ -25,7 +25,7 @@ router.get('/stats', async (req, res, next) => {
     const cached = cache.get('public_platform_stats');
     if (cached) return response.success(res, 'Platform stats', cached);
 
-    const [totalCreators, ratingRow, totalReviews, satisfiedReviews, totalBids, jobsWithBids] = await Promise.all([
+    const [totalCreators, ratingRow, totalReviews, satisfiedReviews, totalBids, jobsWithBids, totalProjects] = await Promise.all([
       User.count({
         where: { role: 'SELLER' },
         include: [{ model: SellerProfile, as: 'sellerProfile', where: { approval_status: 'approved' }, attributes: [] }],
@@ -35,10 +35,12 @@ router.get('/stats', async (req, res, next) => {
       Review.count({ where: { status: 'published', rating: { [Op.gte]: 4 } } }),
       Bid.count(),
       Job.count({ where: { bids_count: { [Op.gt]: 0 } }, paranoid: false }).catch(() => 0),
+      Booking.count(),
     ]);
 
     const result = {
       total_creators:     totalCreators,
+      total_projects:     totalProjects,
       avg_rating:         ratingRow?.avg ? Math.round(Number(ratingRow.avg) * 10) / 10 : 0,
       satisfaction_pct:   totalReviews > 0 ? Math.round((satisfiedReviews / totalReviews) * 100) : 0,
       avg_bids_per_job:   jobsWithBids > 0 ? Math.round((totalBids / jobsWithBids) * 10) / 10 : 0,

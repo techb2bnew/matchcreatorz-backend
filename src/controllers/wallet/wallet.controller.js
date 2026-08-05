@@ -96,6 +96,7 @@ exports.summary = async (req, res, next) => {
  *       - { in: query, name: page,  schema: { type: integer, default: 1 } }
  *       - { in: query, name: limit, schema: { type: integer, default: 20 } }
  *       - { in: query, name: type,  schema: { type: string }, description: filter by transaction type }
+ *       - { in: query, name: search, schema: { type: string }, description: Search by note, transaction type label, or date shown in the UI }
  *     responses: { 200: { description: Paginated transactions } }
  */
 exports.transactions = async (req, res, next) => {

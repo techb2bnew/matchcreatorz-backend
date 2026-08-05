@@ -10,6 +10,17 @@ const INCLUDE = [
   { model: Job,     as: 'job',     attributes: ['id', 'title'],  required: false },
 ];
 
+// Whitelist of columns the grid may sort by, mapped to a Sequelize order path.
+const SORT_FIELDS = {
+  id:     ['id'],
+  title:  ['title'],
+  buyer:  [{ model: User, as: 'buyer' },  'name'],
+  seller: [{ model: User, as: 'seller' }, 'name'],
+  amount: ['amount'],
+  status: ['status'],
+  date:   ['createdAt'],
+};
+
 /**
  * @swagger
  * /api/v1/admin/bookings:
@@ -24,7 +35,7 @@ const INCLUDE = [
  *       - in: query
  *         name: search
  *         schema: { type: string }
- *         description: Search by booking title
+ *         description: Search by booking title, buyer name, or seller name
  *       - in: query
  *         name: page
  *         schema: { type: integer, default: 1 }
@@ -37,19 +48,41 @@ const INCLUDE = [
  */
 exports.listBookings = async (req, res) => {
   try {
-    const { status, search, page = 1, limit = 20 } = req.query;
+    const { status, search, page = 1, limit = 20, sortBy, sortDir } = req.query;
     const where = {};
     if (status) where.status = status;
-    if (search) where.title  = { [Op.iLike]: `%${search}%` };
+    if (search) {
+      const orConditions = [
+        { title:            { [Op.iLike]: `%${search}%` } },
+        { '$buyer.name$':   { [Op.iLike]: `%${search}%` } },
+        { '$seller.name$':  { [Op.iLike]: `%${search}%` } },
+      ];
+
+      // Support matching by the date shown in the table (e.g. "Aug 3, 2026")
+      // by treating a parseable search string as a whole-day range.
+      const parsedDate = new Date(search);
+      if (!isNaN(parsedDate.getTime())) {
+        const dayStart = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate());
+        const dayEnd   = new Date(dayStart);
+        dayEnd.setDate(dayEnd.getDate() + 1);
+        orConditions.push({ createdAt: { [Op.gte]: dayStart, [Op.lt]: dayEnd } });
+      }
+
+      where[Op.or] = orConditions;
+    }
+
+    const sortPath = SORT_FIELDS[sortBy] || SORT_FIELDS.date;
+    const direction = sortDir === 'asc' ? 'ASC' : 'DESC';
 
     const offset = (Number(page) - 1) * Number(limit);
     const { count, rows } = await Booking.findAndCountAll({
       where,
-      include:  INCLUDE,
-      order:    [['created_at', 'DESC']],
-      limit:    Number(limit),
+      include:   INCLUDE,
+      order:     [[...sortPath, direction]],
+      limit:     Number(limit),
       offset,
-      distinct: true,
+      distinct:  true,
+      subQuery:  false,
     });
 
     // Stats

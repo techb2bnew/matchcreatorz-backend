@@ -11,6 +11,16 @@ const { stripHtml } = require('../../helpers/text.helper');
  *   description: Admin job moderation & management
  */
 
+// Whitelist of columns the grid may sort by, mapped to a Sequelize order path.
+const SORT_FIELDS = {
+  title:  ['title'],
+  buyer:  [{ model: User, as: 'buyer' }, 'name'],
+  budget: ['budget_min'],
+  bids:   ['bids_count'],
+  status: ['status'],
+  date:   ['created_at'],
+};
+
 /**
  * @swagger
  * /api/v1/admin/jobs:
@@ -43,7 +53,7 @@ exports.listJobs = async (req, res, next) => {
     const page   = Math.max(1, parseInt(req.query.page)  || 1);
     const limit  = Math.min(50, parseInt(req.query.limit) || 10);
     const offset = (page - 1) * limit;
-    const { search, status } = req.query;
+    const { search, status, sortBy, sortDir } = req.query;
 
     const where = {};
     if (status) where.status = status;
@@ -57,15 +67,20 @@ exports.listJobs = async (req, res, next) => {
       ];
     }
 
+    const sortPath  = SORT_FIELDS[sortBy] || SORT_FIELDS.date;
+    const direction = sortDir === 'asc' ? 'ASC' : 'DESC';
+
     const { rows, count } = await Job.findAndCountAll({
       where,
       include: [
         { model: User, as: 'buyer', attributes: ['id', 'name', 'email'] },
       ],
-      order:   [['created_at', 'DESC']],
+      order:    [[...sortPath, direction]],
       limit,
       offset,
       paranoid: false,
+      distinct: true,
+      subQuery: false,
     });
 
     const data = rows.map((r) => {

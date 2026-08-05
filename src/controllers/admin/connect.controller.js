@@ -110,3 +110,38 @@ exports.sellerHistory = async (req, res, next) => {
     });
   } catch (err) { next(err); }
 };
+
+/**
+ * @swagger
+ * /api/v1/admin/connects/history:
+ *   get:
+ *     summary: Connect ledger across every seller (the "All Sellers" view)
+ *     tags: [Admin - Connects]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 50 }
+ *     responses:
+ *       200:
+ *         description: Paginated ledger with the seller attached to each row
+ */
+exports.allHistory = async (req, res, next) => {
+  try {
+    const page   = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit  = Math.min(50, parseInt(req.query.limit) || 50);
+    const offset = (page - 1) * limit;
+
+    const { count, rows } = await ConnectTransaction.findAndCountAll({
+      include: [{ model: User, as: 'seller', attributes: ['id', 'name', 'email'] }],
+      order:   [['created_at', 'DESC']],
+      limit,
+      offset,
+    });
+
+    return response.paginate(res, 'History fetched', rows, { total: count, page, limit });
+  } catch (err) { next(err); }
+};

@@ -2,6 +2,7 @@
 const User          = require('../../models/user.model');
 const SellerProfile = require('../../models/sellerProfile.model');
 const response      = require('../../helpers/response.helper');
+const { fields: validationFields } = require('../../helpers/validation.helper');
 
 const SAFE_USER = ['id','name','email','phone','role','status','is_verified','bio','location','avatar','created_at'];
 
@@ -98,9 +99,13 @@ const updateSellerProfile = async (req, res, next) => {
     const user = await User.findByPk(req.user.id);
     if (!user) return response.notFound(res, 'User not found');
 
+    const cleanPhone = phone !== undefined ? phone.trim() : undefined;
+    if (cleanPhone && validationFields.phone.validate(cleanPhone).error)
+      return response.badRequest(res, 'Phone number is invalid');
+
     // User fields
     if (name     !== undefined) user.name     = name.trim();
-    if (phone    !== undefined) user.phone    = phone.trim();
+    if (phone    !== undefined) user.phone    = cleanPhone;
     if (bio      !== undefined) user.bio      = bio.trim();
     if (location !== undefined) user.location = location.trim();
     if (avatar   !== undefined) user.avatar   = avatar.trim();

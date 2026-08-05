@@ -2,14 +2,30 @@
 const { Op }       = require('sequelize');
 const { Service, Category, User, SellerProfile } = require('../../models/index');
 
+// Whitelist of columns the grid may sort by, mapped to a Sequelize order path.
+// Never interpolate sortBy directly into the order clause -- only pass values
+// through this whitelist (protects against SQL-injection-via-column-name).
+const SORT_FIELDS = {
+  title:    ['title'],
+  seller:   [{ model: User,     as: 'seller'   }, 'name'],
+  category: [{ model: Category, as: 'category' }, 'name'],
+  price:    ['price'],
+  orders:   ['orders_count'],
+  status:   ['status'],
+  date:     ['created_at'],
+};
+
 // ── List all services ─────────────────────────────────────────────────
-const listServices = async ({ page = 1, limit = 10, search, status, category_id }) => {
+const listServices = async ({ page = 1, limit = 10, search, status, category_id, sortBy, sortDir }) => {
   const offset = (page - 1) * limit;
   const where  = {};
 
   if (search)      where.title       = { [Op.iLike]: `%${search}%` };
   if (status)      where.status      = status;
   if (category_id) where.category_id = category_id;
+
+  const sortPath  = SORT_FIELDS[sortBy] || SORT_FIELDS.date;
+  const direction = sortDir === 'asc' ? 'ASC' : 'DESC';
 
   const { rows, count } = await Service.findAndCountAll({
     where,
@@ -25,9 +41,11 @@ const listServices = async ({ page = 1, limit = 10, search, status, category_id 
         attributes: ['id', 'name', 'icon'],
       },
     ],
-    order:  [['created_at', 'DESC']],
-    limit:  Number(limit),
+    order:     [[...sortPath, direction]],
+    limit:     Number(limit),
     offset,
+    distinct:  true,
+    subQuery:  false,
   });
 
   return { services: rows, total: count, page: Number(page), limit: Number(limit) };

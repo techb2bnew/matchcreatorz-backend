@@ -36,13 +36,39 @@ exports.sendBroadcast = async (adminId, { title, body, audience = 'ALL' } = {}) 
   return broadcast;
 };
 
-exports.listBroadcasts = async ({ page = 1, limit = 20 } = {}) => {
+// Whitelist of columns the history table may sort by — never let an arbitrary
+// sortBy string reach a raw Sequelize order clause (SQL-injection-via-column-name risk).
+const SORT_FIELDS = {
+  title:      ['title'],
+  audience:   ['audience'],
+  recipients: ['recipient_count'],
+  date:       ['createdAt'],
+  sentBy:     [{ model: User, as: 'admin' }, 'name'],
+};
+
+exports.listBroadcasts = async ({ page = 1, limit = 20, search, sortBy, sortDir } = {}) => {
   const offset = (Number(page) - 1) * Number(limit);
+
+  const where = {};
+  if (search && String(search).trim()) {
+    const term = String(search).trim();
+    where[Op.or] = [
+      { title: { [Op.iLike]: `%${term}%` } },
+      { body:  { [Op.iLike]: `%${term}%` } },
+    ];
+  }
+
+  const sortPath  = SORT_FIELDS[sortBy] || SORT_FIELDS.date;
+  const direction = sortDir === 'asc' ? 'ASC' : 'DESC';
+
   const { count, rows } = await Broadcast.findAndCountAll({
-    include: [{ model: User, as: 'admin', attributes: ['id', 'name'] }],
-    order:   [['created_at', 'DESC']],
-    limit:   Number(limit),
+    where,
+    include:  [{ model: User, as: 'admin', attributes: ['id', 'name'] }],
+    order:    [[...sortPath, direction]],
+    limit:    Number(limit),
     offset,
+    distinct: true,
+    subQuery: false,
   });
   return { data: rows, total: count, page: Number(page), limit: Number(limit) };
 };

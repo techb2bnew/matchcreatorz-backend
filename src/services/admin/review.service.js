@@ -3,10 +3,24 @@ const { Review, User, Service, Booking } = require('../../models');
 const { Op, fn, col } = require('sequelize');
 const { recalcSellerRating } = require('../buyer/review.service');
 
-const listAllReviews = async ({ search, status, page = 1, limit = 20 }) => {
+// Whitelist of columns the grid may sort by, mapped to a Sequelize order path.
+const SORT_FIELDS = {
+  id:      ['id'],
+  buyer:   [{ model: User, as: 'buyer' },  'name'],
+  seller:  [{ model: User, as: 'seller' }, 'name'],
+  rating:  ['rating'],
+  comment: ['comment'],
+  status:  ['status'],
+  date:    ['created_at'],
+};
+
+const listAllReviews = async ({ search, status, page = 1, limit = 20, sortBy, sortDir }) => {
   const where = {};
   if (status) where.status = status;
   if (search) where.comment = { [Op.iLike]: `%${search}%` };
+
+  const sortPath  = SORT_FIELDS[sortBy] || SORT_FIELDS.date;
+  const direction = sortDir === 'asc' ? 'ASC' : 'DESC';
 
   const offset = (Number(page) - 1) * Number(limit);
   const { count, rows } = await Review.findAndCountAll({
@@ -17,9 +31,11 @@ const listAllReviews = async ({ search, status, page = 1, limit = 20 }) => {
       { model: Service, as: 'service', attributes: ['id', 'title'], required: false },
       { model: Booking, as: 'booking', attributes: ['id', 'title'], required: false },
     ],
-    order: [['created_at', 'DESC']],
-    limit: Number(limit),
+    order:     [[...sortPath, direction]],
+    limit:     Number(limit),
     offset,
+    distinct:  true,
+    subQuery:  false,
   });
 
   const allStatuses = await Review.findAll({ attributes: ['status'], raw: true });

@@ -34,14 +34,20 @@ const response     = require('../../helpers/response.helper');
  *       - in: query
  *         name: approval_status
  *         schema: { type: string, enum: [pending, approved, rejected] }
+ *       - in: query
+ *         name: sortBy
+ *         schema: { type: string, enum: [name, email, user_status, joined, approval_status, bookings_count, total_spent] }
+ *       - in: query
+ *         name: sortDir
+ *         schema: { type: string, enum: [asc, desc] }
  *     responses:
  *       200:
  *         description: Buyers list
  */
 const listBuyers = async (req, res, next) => {
   try {
-    const { page, limit, search, status, approval_status } = req.query;
-    const result = await buyerService.listBuyers({ page, limit, search, status, approval_status });
+    const { page, limit, search, status, approval_status, sortBy, sortDir } = req.query;
+    const result = await buyerService.listBuyers({ page, limit, search, status, approval_status, sortBy, sortDir });
     return response.paginate(res, 'Buyers fetched', result.buyers, {
       page: result.page, limit: result.limit, total: result.total,
     });

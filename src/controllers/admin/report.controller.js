@@ -45,6 +45,10 @@ exports.listReportTypes = async (req, res) => {
  *         name: to
  *         schema: { type: string, format: date }
  *         description: "YYYY-MM-DD — defaults to today"
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *         description: Filters table rows by the report's text-searchable columns (varies per type)
  *     responses:
  *       200:
  *         description: "{ summary, chart, columns, rows, truncated }"

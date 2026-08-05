@@ -2,21 +2,64 @@
 const { Op }                 = require('sequelize');
 const { Category, Service }  = require('../../models/index');
 
+// Whitelist of columns the grid may sort by, mapped to a Sequelize order path.
+// (services_count/sellers_count are computed post-query, not real columns —
+// see COMPUTED_SORT_FIELDS below; never let an arbitrary sortBy reach `order`.)
+const SORT_FIELDS = {
+  name:      ['name'],
+  createdAt: ['createdAt'],
+};
+const COMPUTED_SORT_FIELDS = ['services_count', 'sellers_count'];
+
 // ── List categories ───────────────────────────────────────────────────
-const listCategories = async ({ page = 1, limit = 20, search }) => {
+const listCategories = async ({ page = 1, limit = 20, search, sortBy, sortDir }) => {
   const offset = (page - 1) * limit;
 
   const where = {};
   if (search) where.name = { [Op.iLike]: `%${search}%` };
 
+  const direction    = sortDir === 'desc' ? 'DESC' : 'ASC';
+  const isComputed   = COMPUTED_SORT_FIELDS.includes(sortBy);
+  const sortPath     = SORT_FIELDS[sortBy] || SORT_FIELDS.name;
+
+  // Sorting by a computed count can't be pushed into the DB query, so a
+  // page-then-sort would only reorder within whatever page name-order handed
+  // us. Instead fetch every matching row, compute+sort in full, then slice
+  // the page out afterward — category lists are small enough for this to be
+  // cheap, and it's the only way the ordering is globally correct.
+  if (isComputed) {
+    const allRows = await Category.findAll({ where, order: [['name', 'ASC']] });
+    let all = await Promise.all(allRows.map(async (cat) => {
+      const j = cat.toJSON();
+      j.services_count = await Service.count({ where: { category_id: cat.id } });
+      j.sellers_count  = await Service.count({ where: { category_id: cat.id }, distinct: true, col: 'seller_id' });
+      return j;
+    }));
+    all = all.sort((a, b) => {
+      const diff = a[sortBy] - b[sortBy];
+      return direction === 'ASC' ? diff : -diff;
+    });
+    const categories = all.slice(offset, offset + Number(limit));
+    return { categories, total: all.length, page: Number(page), limit: Number(limit) };
+  }
+
   const { rows, count } = await Category.findAndCountAll({
     where,
-    order:  [['name', 'ASC']],
+    order:  [[...sortPath, direction]],
     limit:  Number(limit),
     offset,
   });
 
-  return { categories: rows, total: count, page: Number(page), limit: Number(limit) };
+  // Live counts (not the dead services_count/sellers_count columns, which are
+  // never updated) so this always agrees with deleteCategory's own live check.
+  const categories = await Promise.all(rows.map(async (cat) => {
+    const j = cat.toJSON();
+    j.services_count = await Service.count({ where: { category_id: cat.id } });
+    j.sellers_count  = await Service.count({ where: { category_id: cat.id }, distinct: true, col: 'seller_id' });
+    return j;
+  }));
+
+  return { categories, total: count, page: Number(page), limit: Number(limit) };
 };
 
 // ── Get by ID ─────────────────────────────────────────────────────────

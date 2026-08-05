@@ -10,8 +10,9 @@ const listMyServices = async (sellerId, { page = 1, limit = 10, search, status }
   if (search) {
     const safe = search.replace(/'/g, "''");
     where[Op.or] = [
-      { title:       { [Op.iLike]: `%${search}%` } },
-      { description: { [Op.iLike]: `%${search}%` } },
+      { title:              { [Op.iLike]: `%${search}%` } },
+      { description:        { [Op.iLike]: `%${search}%` } },
+      { '$category.name$':  { [Op.iLike]: `%${search}%` } },
       literal(`EXISTS (SELECT 1 FROM jsonb_array_elements_text("Service"."tags") t WHERE t ILIKE '%${safe}%')`),
     ];
   }
@@ -19,10 +20,12 @@ const listMyServices = async (sellerId, { page = 1, limit = 10, search, status }
 
   const { rows, count } = await Service.findAndCountAll({
     where,
-    include: [{ model: Category, as: 'category', attributes: ['id', 'name', 'icon'] }],
-    order:  [['created_at', 'DESC']],
-    limit:  Number(limit),
+    include:  [{ model: Category, as: 'category', attributes: ['id', 'name', 'icon'] }],
+    order:    [['created_at', 'DESC']],
+    limit:    Number(limit),
     offset,
+    distinct: true,
+    subQuery: false,
   });
 
   return { services: rows, total: count, page: Number(page), limit: Number(limit) };

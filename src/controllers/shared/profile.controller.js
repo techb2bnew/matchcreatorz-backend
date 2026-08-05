@@ -2,6 +2,7 @@
 const bcrypt   = require('bcryptjs');
 const { User, SellerProfile } = require('../../models');
 const response = require('../../helpers/response.helper');
+const { fields: validationFields } = require('../../helpers/validation.helper');
 
 /**
  * @swagger
@@ -210,8 +211,12 @@ const updateProfile = async (req, res, next) => {
     // Only update fields that were actually sent. Null-safe: coerce to string
     // before trimming so a null/number payload can never throw.
     const clean = (v) => (v === null || v === undefined ? v : String(v).trim());
+    const cleanPhone = phone !== undefined ? clean(phone) : undefined;
+    if (cleanPhone && validationFields.phone.validate(cleanPhone).error)
+      return response.badRequest(res, 'Phone number is invalid');
+
     if (name     !== undefined) user.name     = clean(name);
-    if (phone    !== undefined) user.phone    = clean(phone);
+    if (phone    !== undefined) user.phone    = cleanPhone;
     if (bio      !== undefined) user.bio      = clean(bio);
     if (location !== undefined) user.location = clean(location);
     if (avatar   !== undefined) user.avatar   = clean(avatar);

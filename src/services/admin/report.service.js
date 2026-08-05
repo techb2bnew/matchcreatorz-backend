@@ -29,25 +29,29 @@ const MAX_ROWS = 5000;
 
 exports.listTypes = () => REPORT_TYPES;
 
-exports.getReport = async (type, { from, to } = {}) => {
+exports.getReport = async (type, { from, to, search } = {}) => {
   const { start, end } = resolveRange(from, to);
   const range = { [Op.between]: [start, end] };
+  const term  = search && String(search).trim() ? String(search).trim() : null;
 
   switch (type) {
-    case 'revenue':  return revenueReport(range);
-    case 'bookings': return bookingsReport(range);
-    case 'users':    return usersReport(range);
-    case 'sellers':  return sellersReport(range);
-    case 'wallet':   return walletReport(range);
-    case 'connects': return connectsReport(range);
+    case 'revenue':  return revenueReport(range, term);
+    case 'bookings': return bookingsReport(range, term);
+    case 'users':    return usersReport(range, term);
+    case 'sellers':  return sellersReport(range, term);
+    case 'wallet':   return walletReport(range, term);
+    case 'connects': return connectsReport(range, term);
     default: throw Object.assign(new Error('Unknown report type'), { status: 400 });
   }
 };
 
 // ── Revenue (platform fee) ───────────────────────────────────────────────────
-async function revenueReport(range) {
+async function revenueReport(range, search) {
+  const where = { type: 'platform_fee', created_at: range };
+  if (search) where.note = { [Op.iLike]: `%${search}%` };
+
   const rows = await WalletTransaction.findAll({
-    where: { type: 'platform_fee', created_at: range },
+    where,
     order: [['created_at', 'DESC']],
     limit: MAX_ROWS,
   });
@@ -82,15 +86,25 @@ async function revenueReport(range) {
 }
 
 // ── Bookings ──────────────────────────────────────────────────────────────
-async function bookingsReport(range) {
+async function bookingsReport(range, search) {
+  const where = { created_at: range };
+  if (search) {
+    where[Op.or] = [
+      { title:           { [Op.iLike]: `%${search}%` } },
+      { '$buyer.name$':  { [Op.iLike]: `%${search}%` } },
+      { '$seller.name$': { [Op.iLike]: `%${search}%` } },
+    ];
+  }
+
   const rows = await Booking.findAll({
-    where: { created_at: range },
+    where,
     include: [
       { model: User, as: 'buyer',  attributes: ['id', 'name'] },
       { model: User, as: 'seller', attributes: ['id', 'name'] },
     ],
-    order: [['created_at', 'DESC']],
-    limit: MAX_ROWS,
+    order:    [['created_at', 'DESC']],
+    limit:    MAX_ROWS,
+    subQuery: false,
   });
 
   const byStatus = {};
@@ -129,9 +143,17 @@ async function bookingsReport(range) {
 }
 
 // ── User signups ──────────────────────────────────────────────────────────
-async function usersReport(range) {
+async function usersReport(range, search) {
+  const where = { role: { [Op.in]: ['SELLER', 'BUYER'] }, created_at: range };
+  if (search) {
+    where[Op.or] = [
+      { name:  { [Op.iLike]: `%${search}%` } },
+      { email: { [Op.iLike]: `%${search}%` } },
+    ];
+  }
+
   const rows = await User.findAll({
-    where: { role: { [Op.in]: ['SELLER', 'BUYER'] }, created_at: range },
+    where,
     attributes: ['id', 'name', 'email', 'role', 'status', 'created_at'],
     order: [['created_at', 'DESC']],
     limit: MAX_ROWS,
@@ -168,7 +190,7 @@ async function usersReport(range) {
 // ── Seller performance ────────────────────────────────────────────────────
 // Ranked by earnings booked in-range (WalletTransaction type='earning', whose
 // user_id is the seller who was credited) — not by profile join date.
-async function sellersReport(range) {
+async function sellersReport(range, search) {
   const earnings = await WalletTransaction.findAll({
     attributes: ['user_id', [fn('SUM', col('amount')), 'total_earnings'], [fn('COUNT', col('id')), 'payouts']],
     where: { type: 'earning', created_at: range },
@@ -185,7 +207,7 @@ async function sellersReport(range) {
     : [];
   const profileByUser = new Map(profiles.map((p) => [p.user_id, p]));
 
-  const rows = earnings
+  let rows = earnings
     .map((e) => {
       const p = profileByUser.get(e.user_id);
       return {
@@ -199,8 +221,15 @@ async function sellersReport(range) {
         total_reviews: p?.total_reviews || 0,
       };
     })
-    .sort((a, b) => b.total_earnings - a.total_earnings)
-    .slice(0, 100);
+    .sort((a, b) => b.total_earnings - a.total_earnings);
+
+  // No SQL `where` is possible here — earnings are pre-aggregated in JS above
+  // — so search filters this already-built plain-object array instead.
+  if (search) {
+    const q = search.toLowerCase();
+    rows = rows.filter((r) => r.name.toLowerCase().includes(q) || r.email.toLowerCase().includes(q));
+  }
+  rows = rows.slice(0, 100);
 
   return {
     summary: { seller_count: rows.length },
@@ -216,13 +245,16 @@ async function sellersReport(range) {
 }
 
 // ── Wallet activity ───────────────────────────────────────────────────────
-async function walletReport(range) {
+async function walletReport(range, search) {
+  const rowsWhere = { type: { [Op.in]: ['topup', 'withdrawal', 'platform_fee'] }, created_at: range };
+  if (search) rowsWhere.note = { [Op.iLike]: `%${search}%` };
+
   const [topups, withdrawalsPaid, platformFee, rows] = await Promise.all([
     WalletTransaction.sum('amount', { where: { type: 'topup', created_at: range } }),
     Withdrawal.sum('amount', { where: { status: 'paid', processed_at: range } }),
     WalletTransaction.sum('amount', { where: { type: 'platform_fee', created_at: range } }),
     WalletTransaction.findAll({
-      where: { type: { [Op.in]: ['topup', 'withdrawal', 'platform_fee'] }, created_at: range },
+      where: rowsWhere,
       order: [['created_at', 'DESC']],
       limit: MAX_ROWS,
     }),
@@ -258,12 +290,22 @@ async function walletReport(range) {
 }
 
 // ── Connects ──────────────────────────────────────────────────────────────
-async function connectsReport(range) {
+async function connectsReport(range, search) {
+  const where = { created_at: range };
+  if (search) {
+    where[Op.or] = [
+      { note:             { [Op.iLike]: `%${search}%` } },
+      { type:             { [Op.iLike]: `%${search}%` } },
+      { '$seller.name$':  { [Op.iLike]: `%${search}%` } },
+    ];
+  }
+
   const rows = await ConnectTransaction.findAll({
-    where: { created_at: range },
-    include: [{ model: User, as: 'seller', attributes: ['id', 'name'] }],
-    order: [['created_at', 'DESC']],
-    limit: MAX_ROWS,
+    where,
+    include:  [{ model: User, as: 'seller', attributes: ['id', 'name'] }],
+    order:    [['created_at', 'DESC']],
+    limit:    MAX_ROWS,
+    subQuery: false,
   });
 
   const byType = {};

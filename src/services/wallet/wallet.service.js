@@ -77,10 +77,44 @@ const releasePending = async (userId, amount, t = null) => {
   return t ? run(t) : sequelize.transaction(run);
 };
 
+// Mirrors the frontend's TX_LABEL fallback (matchcreatorz/src/app/(buyer)/buyer/wallet/page.tsx)
+// so a search matches what the user actually sees when a transaction has no note.
+const TYPE_LABELS = {
+  topup: 'Wallet top-up', booking_payment: 'Booking payment', booking_refund: 'Booking refund',
+  earning: 'Earning', platform_fee: 'Platform fee', withdrawal: 'Withdrawal',
+  withdrawal_reversal: 'Withdrawal reversed', adjustment: 'Adjustment',
+  milestone_release: 'Milestone released to seller',
+};
+
 // ── Reads ─────────────────────────────────────────────────────────────────────
-const listTransactions = async (userId, { page = 1, limit = 20, type } = {}) => {
+const listTransactions = async (userId, { page = 1, limit = 20, type, search } = {}) => {
   const where = { user_id: userId };
   if (type) where.type = type;
+
+  if (search && String(search).trim()) {
+    const term = String(search).trim();
+    const orConditions = [{ note: { [Op.iLike]: `%${term}%` } }];
+
+    // A type whose human-readable label matches the search term (e.g. searching
+    // "top-up" should find rows with no note but type='topup').
+    const matchingTypes = Object.entries(TYPE_LABELS)
+      .filter(([, label]) => label.toLowerCase().includes(term.toLowerCase()))
+      .map(([key]) => key);
+    if (matchingTypes.length) orConditions.push({ type: { [Op.in]: matchingTypes } });
+
+    // Support matching by the date shown in the UI (e.g. "Aug 3, 2026") by
+    // treating a parseable search string as a whole-day range.
+    const parsedDate = new Date(term);
+    if (!isNaN(parsedDate.getTime())) {
+      const dayStart = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate());
+      const dayEnd   = new Date(dayStart);
+      dayEnd.setDate(dayEnd.getDate() + 1);
+      orConditions.push({ created_at: { [Op.gte]: dayStart, [Op.lt]: dayEnd } });
+    }
+
+    where[Op.or] = orConditions;
+  }
+
   const offset = (Number(page) - 1) * Number(limit);
   const { count, rows } = await WalletTransaction.findAndCountAll({
     where, order: [['created_at', 'DESC']], limit: Number(limit), offset,

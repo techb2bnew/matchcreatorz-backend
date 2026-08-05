@@ -14,7 +14,7 @@ const response                           = require('../../helpers/response.helpe
  *       - in: query
  *         name: search
  *         schema: { type: string }
- *         description: Case-insensitive search in title, description, tags
+ *         description: Case-insensitive search in title, description, tags, seller name
  *       - in: query
  *         name: category
  *         schema: { type: string }
@@ -68,8 +68,9 @@ exports.searchServices = async (req, res) => {
       const term = search.trim();
       const safe = term.replace(/'/g, "''");   // escape single quotes for the raw literal
       where[Op.or] = [
-        { title:       { [Op.iLike]: `%${term}%` } },
-        { description: { [Op.iLike]: `%${term}%` } },
+        { title:            { [Op.iLike]: `%${term}%` } },
+        { description:      { [Op.iLike]: `%${term}%` } },
+        { '$seller.name$':  { [Op.iLike]: `%${term}%` } },
         // searchable tags (tags stored as JSONB array of strings)
         literal(`EXISTS (SELECT 1 FROM jsonb_array_elements_text("Service"."tags") t WHERE t ILIKE '%${safe}%')`),
       ];
@@ -118,9 +119,10 @@ exports.searchServices = async (req, res) => {
         },
       ],
       order,
-      limit:  Number(limit),
+      limit:    Number(limit),
       offset,
       distinct: true,
+      subQuery: false,
     });
 
     // Respect seller "Show Ratings" — hide rating on services whose seller opted out

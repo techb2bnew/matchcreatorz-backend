@@ -12,7 +12,7 @@ const { listBookings: listAdminBookings, getBooking: getAdminBooking, resolveDis
 const { listReviews: listAdminReviews, publishReview, hideReview, deleteReview } = require('../../controllers/admin/review.controller');
 const { getStats: getAdminStats } = require('../../controllers/admin/stats.controller');
 const { listJobs, getJob, closeJob, deleteJob } = require('../../controllers/admin/job.controller');
-const { addConnects, sellerHistory: connectsSellerHistory } = require('../../controllers/admin/connect.controller');
+const { addConnects, sellerHistory: connectsSellerHistory, allHistory: connectsAllHistory } = require('../../controllers/admin/connect.controller');
 const { getSettings, updateSettings } = require('../../controllers/admin/setting.controller');
 const { listNotifications, getUnreadCount, markOneRead, markAllRead, deleteOne } = require('../../controllers/shared/notification.controller');
 const { registerFcmToken, clearFcmToken } = require('../../controllers/shared/fcm.controller');
@@ -97,6 +97,7 @@ router.delete('/jobs/:id',          deleteJob);
 
 // ── Connects ───────────────────────────────────────────────────────────
 router.post('/connects/:sellerId',         addConnects);
+router.get ('/connects/history',           connectsAllHistory);
 router.get ('/connects/:sellerId/history', connectsSellerHistory);
 
 // ── Settings ───────────────────────────────────────────────────────────

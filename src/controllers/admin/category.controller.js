@@ -28,14 +28,20 @@ const response        = require('../../helpers/response.helper');
  *         name: search
  *         schema: { type: string }
  *         description: Search by category name
+ *       - in: query
+ *         name: sortBy
+ *         schema: { type: string, enum: [name, createdAt, services_count, sellers_count] }
+ *       - in: query
+ *         name: sortDir
+ *         schema: { type: string, enum: [asc, desc] }
  *     responses:
  *       200:
  *         description: Categories list
  */
 const listCategories = async (req, res, next) => {
   try {
-    const { page, limit, search } = req.query;
-    const result = await categoryService.listCategories({ page, limit, search });
+    const { page, limit, search, sortBy, sortDir } = req.query;
+    const result = await categoryService.listCategories({ page, limit, search, sortBy, sortDir });
     return response.paginate(res, 'Categories fetched', result.categories, {
       page: result.page, limit: result.limit, total: result.total,
     });

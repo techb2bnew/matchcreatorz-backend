@@ -34,6 +34,12 @@ const response = require('../../helpers/response.helper');
  *       - in: query
  *         name: category_id
  *         schema: { type: integer }
+ *       - in: query
+ *         name: sortBy
+ *         schema: { type: string, enum: [title, seller, category, price, orders, status, date] }
+ *       - in: query
+ *         name: sortDir
+ *         schema: { type: string, enum: [asc, desc] }
  *     responses:
  *       200:
  *         description: Services list

@@ -13,8 +13,21 @@ const sellerInclude = {
                 'connects_balance','is_available','approval_status'],
 };
 
+// Whitelist of columns the Sellers grid may sort by, mapped to a Sequelize
+// order path. Security requirement: never interpolate sortBy directly into
+// an order clause (SQL-injection-via-column-name risk) — only pass through
+// this whitelist.
+const SORT_FIELDS = {
+  name:       ['name'],
+  hourlyRate: [{ model: SellerProfile, as: 'sellerProfile' }, 'hourly_rate'],
+  rating:     [{ model: SellerProfile, as: 'sellerProfile' }, 'rating'],
+  status:     [{ model: SellerProfile, as: 'sellerProfile' }, 'approval_status'],
+  userStatus: ['status'],
+  joined:     ['createdAt'],
+};
+
 // ── List sellers ─────────────────────────────────────────────────────
-const listSellers = async ({ page = 1, limit = 10, search, approval_status, status, deleted }) => {
+const listSellers = async ({ page = 1, limit = 10, search, approval_status, status, deleted, sortBy, sortDir }) => {
   const offset = (page - 1) * limit;
 
   const userWhere = { role: 'SELLER' };
@@ -30,6 +43,9 @@ const listSellers = async ({ page = 1, limit = 10, search, approval_status, stat
   if (approval_status) profileWhere.approval_status = approval_status;
   const hasProfileFilter = Object.keys(profileWhere).length > 0;
 
+  const sortPath  = SORT_FIELDS[sortBy] || SORT_FIELDS.joined;
+  const direction = sortDir === 'asc' ? 'ASC' : 'DESC';
+
   const { rows } = await User.findAndCountAll({
     where:   userWhere,
     include: [{
@@ -41,7 +57,7 @@ const listSellers = async ({ page = 1, limit = 10, search, approval_status, stat
       required: hasProfileFilter,
       paranoid: false,
     }],
-    order:    [['createdAt', 'DESC']],
+    order:    [[...sortPath, direction]],
     paranoid: false,   // fetch ALL (deleted + non-deleted), filter in JS
     distinct: true,
   });

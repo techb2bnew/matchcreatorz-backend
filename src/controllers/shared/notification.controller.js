@@ -50,6 +50,10 @@ const { Op }           = require('sequelize');
  *       - in: query
  *         name: unread_only
  *         schema: { type: boolean }
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *         description: Search by title or body
  *     responses:
  *       200:
  *         description: List of notifications
@@ -59,9 +63,16 @@ const listNotifications = async (req, res, next) => {
     const page       = Math.max(1, parseInt(req.query.page)  || 1);
     const limit      = Math.min(50, parseInt(req.query.limit) || 20);
     const unreadOnly = req.query.unread_only === 'true';
+    const search     = req.query.search && String(req.query.search).trim();
 
     const where = { user_id: req.user.id };
     if (unreadOnly) where.is_read = false;
+    if (search) {
+      where[Op.or] = [
+        { title: { [Op.iLike]: `%${search}%` } },
+        { body:  { [Op.iLike]: `%${search}%` } },
+      ];
+    }
 
     const { count, rows } = await Notification.findAndCountAll({
       where,
