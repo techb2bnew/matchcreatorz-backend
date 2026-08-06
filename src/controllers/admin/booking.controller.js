@@ -1,5 +1,5 @@
 'use strict';
-const { Op }                            = require('sequelize');
+const { Op, literal }                   = require('sequelize');
 const { sequelize, Booking, User, Service, Job } = require('../../models');
 const wallet                            = require('../../services/wallet/wallet.service');
 
@@ -35,7 +35,7 @@ const SORT_FIELDS = {
  *       - in: query
  *         name: search
  *         schema: { type: string }
- *         description: Search by booking title, buyer name, or seller name
+ *         description: Search by ID, title, buyer name, seller name, amount, status, or date
  *       - in: query
  *         name: page
  *         schema: { type: integer, default: 1 }
@@ -52,15 +52,27 @@ exports.listBookings = async (req, res) => {
     const where = {};
     if (status) where.status = status;
     if (search) {
+      const term = String(search).trim();
+      const safe = term.replace(/'/g, "''");
+
       const orConditions = [
-        { title:            { [Op.iLike]: `%${search}%` } },
-        { '$buyer.name$':   { [Op.iLike]: `%${search}%` } },
-        { '$seller.name$':  { [Op.iLike]: `%${search}%` } },
+        { title:            { [Op.iLike]: `%${term}%` } },
+        { '$buyer.name$':   { [Op.iLike]: `%${term}%` } },
+        { '$seller.name$':  { [Op.iLike]: `%${term}%` } },
+        // `amount` is numeric and `status` is a Postgres ENUM — ILIKE needs an
+        // explicit ::text cast on both, or Postgres errors ("operator does not exist").
+        literal(`"Booking"."amount"::text ILIKE '%${safe}%'`),
+        literal(`"Booking"."status"::text ILIKE '%${safe}%'`),
       ];
+
+      // Match the "#82" style ID shown in the grid — strip a leading # and
+      // require the remainder to be a plain integer before comparing.
+      const idTerm = term.replace(/^#/, '');
+      if (/^\d+$/.test(idTerm)) orConditions.push({ id: Number(idTerm) });
 
       // Support matching by the date shown in the table (e.g. "Aug 3, 2026")
       // by treating a parseable search string as a whole-day range.
-      const parsedDate = new Date(search);
+      const parsedDate = new Date(term);
       if (!isNaN(parsedDate.getTime())) {
         const dayStart = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate());
         const dayEnd   = new Date(dayStart);

@@ -1,6 +1,6 @@
 'use strict';
 const bcrypt      = require('bcryptjs');
-const { Op, literal } = require('sequelize');
+const { Op, literal, fn, col, where: whereFn } = require('sequelize');
 const { User, SellerProfile, Booking, WalletTransaction } = require('../../models/index');
 const { sendAdminWelcome }    = require('../../helpers/email.helper');
 const notify                  = require('../../helpers/notification.helper');
@@ -32,10 +32,32 @@ const listSellers = async ({ page = 1, limit = 10, search, approval_status, stat
 
   const userWhere = { role: 'SELLER' };
   if (status)  userWhere.status = status;
-  if (search)  userWhere[Op.or] = [
-    { name:  { [Op.iLike]: `%${search}%` } },
-    { email: { [Op.iLike]: `%${search}%` } },
-  ];
+  if (search) {
+    const term = search.trim();
+    const safe = term.replace(/'/g, "''");
+    userWhere[Op.or] = [
+      { name:  { [Op.iLike]: `%${term}%` } },
+      { email: { [Op.iLike]: `%${term}%` } },
+      // `status` is a Postgres ENUM, `hourly_rate`/`rating` are numeric — ILIKE
+      // needs an explicit ::text cast on all three, or Postgres errors
+      // ("operator does not exist") rather than just not matching.
+      literal(`"User"."status"::text ILIKE '%${safe}%'`),
+      literal(`"sellerProfile"."hourly_rate"::text ILIKE '%${safe}%'`),
+      literal(`"sellerProfile"."rating"::text ILIKE '%${safe}%'`),
+      literal(`"sellerProfile"."approval_status"::text ILIKE '%${safe}%'`),
+      // skills is a text array — search each element.
+      literal(`EXISTS (SELECT 1 FROM unnest("sellerProfile"."skills") sk WHERE sk ILIKE '%${safe}%')`),
+    ];
+
+    // Support matching by the "Joined" date shown in the UI (e.g. "Aug 3, 2026").
+    const parsedDate = new Date(term);
+    if (!isNaN(parsedDate.getTime())) {
+      const dayStart = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate());
+      const dayEnd   = new Date(dayStart);
+      dayEnd.setDate(dayEnd.getDate() + 1);
+      userWhere[Op.or].push({ createdAt: { [Op.gte]: dayStart, [Op.lt]: dayEnd } });
+    }
+  }
 
   const showDeleted = deleted === true || deleted === 'true';
 

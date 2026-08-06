@@ -1,6 +1,5 @@
 'use strict';
 const bcrypt     = require('bcryptjs');
-const { Op, literal } = require('sequelize');
 const { User, BuyerProfile, Booking, Wallet } = require('../../models/index');
 const { sendAdminWelcome }   = require('../../helpers/email.helper');
 const notify                 = require('../../helpers/notification.helper');
@@ -26,19 +25,36 @@ const SORT_FIELDS = {
 // sorted in JS after the stats are computed for the full filtered set.
 const COMPUTED_SORT_FIELDS = new Set(['bookings_count', 'total_spent']);
 
+// A search term matches a buyer if it appears in ANY grid column — including
+// Bookings/Spent, which are computed in JS (not real DB columns), so plain SQL
+// `where` can't reach them. When searching, we fetch every candidate buyer,
+// compute their stats, and filter/sort in JS against the full set before
+// paginating — the same "full set first" approach already used for computed-sort.
+function matchesBuyerSearch(term, user, bookingsCount, totalSpent) {
+  const q = term.toLowerCase();
+  const joinedStr = new Date(user.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return (
+    (user.name || '').toLowerCase().includes(q) ||
+    (user.email || '').toLowerCase().includes(q) ||
+    (user.phone || '').toLowerCase().includes(q) ||
+    (user.status || '').toLowerCase().includes(q) ||
+    (user.buyerProfile?.approval_status || '').toLowerCase().includes(q) ||
+    joinedStr.toLowerCase().includes(q) ||
+    String(bookingsCount).includes(q) ||
+    totalSpent.toFixed(2).includes(q)
+  );
+}
+
 // ── List buyers ───────────────────────────────────────────────────────
 const listBuyers = async ({ page = 1, limit = 10, search, approval_status, status, deleted, sortBy, sortDir }) => {
   const offset = (page - 1) * limit;
   const direction = sortDir === 'asc' ? 'ASC' : 'DESC';
   const isComputedSort = COMPUTED_SORT_FIELDS.has(sortBy);
   const sortPath = SORT_FIELDS[sortBy] || SORT_FIELDS.joined;
+  const term = search && String(search).trim();
 
   const userWhere = { role: 'BUYER' };
   if (status) userWhere.status = status;
-  if (search) userWhere[Op.or] = [
-    { name:  { [Op.iLike]: `%${search}%` } },
-    { email: { [Op.iLike]: `%${search}%` } },
-  ];
 
   const showDeleted = deleted === true || deleted === 'true';
 
@@ -57,9 +73,9 @@ const listBuyers = async ({ page = 1, limit = 10, search, approval_status, statu
       // instead of filtering rows, so an INNER JOIN is needed to actually filter.
       required: hasProfileFilter,
     }],
-    // When sorting by a computed field, the SQL order is irrelevant — the JS
-    // sort below re-orders everything once stats are available.
-    order:     isComputedSort ? [['createdAt', 'DESC']] : [[...sortPath, direction]],
+    // When sorting/searching needs the full computed-stats set, the SQL order
+    // is irrelevant — the JS sort below re-orders everything once available.
+    order:     (isComputedSort || term) ? [['createdAt', 'DESC']] : [[...sortPath, direction]],
     paranoid:  false,   // fetch ALL, filter in JS
     distinct:  true,
     subQuery:  false,
@@ -70,12 +86,10 @@ const listBuyers = async ({ page = 1, limit = 10, search, approval_status, statu
     ? rows.filter(r => r.dataValues.deletedAt != null)   // deleted users only
     : rows.filter(r => r.dataValues.deletedAt == null);  // non-deleted only
 
-  const total = filtered.length;
-
-  if (isComputedSort) {
-    // Sorting by bookings_count/total_spent requires stats for the ENTIRE
-    // filtered set (not just the current page) before we can sort and slice.
-    const withStats = await Promise.all(filtered.map(async (u) => {
+  if (isComputedSort || term) {
+    // Stats for the ENTIRE filtered set are needed up front — either to sort
+    // by a computed column, or to let search match against Bookings/Spent.
+    let withStats = await Promise.all(filtered.map(async (u) => {
       const [bookingsCount, wallet] = await Promise.all([
         Booking.count({ where: { buyer_id: u.id } }),
         Wallet.findOne({ where: { user_id: u.id }, attributes: ['total_out'] }),
@@ -83,16 +97,42 @@ const listBuyers = async ({ page = 1, limit = 10, search, approval_status, statu
       return { user: u, bookingsCount, totalSpent: Number(wallet?.total_out || 0) };
     }));
 
-    withStats.sort((a, b) => {
-      const av = sortBy === 'bookings_count' ? a.bookingsCount : a.totalSpent;
-      const bv = sortBy === 'bookings_count' ? b.bookingsCount : b.totalSpent;
-      return direction === 'ASC' ? av - bv : bv - av;
-    });
+    if (term) {
+      withStats = withStats.filter(({ user, bookingsCount, totalSpent }) => matchesBuyerSearch(term, user, bookingsCount, totalSpent));
+    }
+
+    const total = withStats.length;
+
+    if (isComputedSort) {
+      withStats.sort((a, b) => {
+        const av = sortBy === 'bookings_count' ? a.bookingsCount : a.totalSpent;
+        const bv = sortBy === 'bookings_count' ? b.bookingsCount : b.totalSpent;
+        return direction === 'ASC' ? av - bv : bv - av;
+      });
+    } else {
+      // Generic sort over the in-memory set for any other column, now that
+      // everything's already loaded (search forced a full fetch above).
+      withStats.sort((a, b) => {
+        let av, bv;
+        if (sortPath.length === 1) {
+          av = a.user[sortPath[0]]; bv = b.user[sortPath[0]];
+        } else {
+          av = a.user.buyerProfile?.approval_status; bv = b.user.buyerProfile?.approval_status;
+        }
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        if (typeof av === 'string') return direction === 'ASC' ? av.localeCompare(bv) : bv.localeCompare(av);
+        return direction === 'ASC' ? av - bv : bv - av;
+      });
+    }
 
     const paginated = withStats.slice(offset, offset + Number(limit));
     const buyers = paginated.map(({ user, bookingsCount, totalSpent }) => formatBuyer(user, bookingsCount, totalSpent));
     return { buyers, total, page: Number(page), limit: Number(limit) };
   }
+
+  const total = filtered.length;
 
   // Apply pagination after filter
   const paginated = filtered.slice(offset, offset + Number(limit));

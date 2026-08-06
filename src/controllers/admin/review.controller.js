@@ -13,7 +13,7 @@ const response = require('../../helpers/response.helper');
  *       - in: query
  *         name: search
  *         schema: { type: string }
- *         description: Search by comment text
+ *         description: Search by comment, reviewer name, seller name, service/booking title, rating, status, or date
  *       - in: query
  *         name: status
  *         schema: { type: string, enum: [published, hidden] }

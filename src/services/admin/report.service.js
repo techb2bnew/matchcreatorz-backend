@@ -1,5 +1,5 @@
 'use strict';
-const { Op, fn, col } = require('sequelize');
+const { Op, fn, col, literal } = require('sequelize');
 const {
   User, Booking, WalletTransaction, ConnectTransaction,
   SellerProfile, Withdrawal,
@@ -45,10 +45,39 @@ exports.getReport = async (type, { from, to, search } = {}) => {
   }
 };
 
+// Builds a date-range OR condition for the "created_at" column when `term`
+// parses as a date (e.g. "Aug 3, 2026", matching what the grid displays).
+function dateSearchCondition(term, dateColumn = 'created_at') {
+  const parsedDate = new Date(term);
+  if (isNaN(parsedDate.getTime())) return null;
+  const dayStart = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate());
+  const dayEnd   = new Date(dayStart);
+  dayEnd.setDate(dayEnd.getDate() + 1);
+  return { [dateColumn]: { [Op.gte]: dayStart, [Op.lt]: dayEnd } };
+}
+
+// `literal(...)` for ILIKE against a numeric/ENUM column, which Postgres
+// otherwise rejects outright ("operator does not exist") rather than just
+// not matching — every numeric/ENUM column searched in this file needs this.
+function castIlike(modelAlias, columnName, term) {
+  const safe = term.replace(/'/g, "''");
+  return literal(`"${modelAlias}"."${columnName}"::text ILIKE '%${safe}%'`);
+}
+
 // ── Revenue (platform fee) ───────────────────────────────────────────────────
 async function revenueReport(range, search) {
   const where = { type: 'platform_fee', created_at: range };
-  if (search) where.note = { [Op.iLike]: `%${search}%` };
+  if (search) {
+    const orConditions = [
+      { note: { [Op.iLike]: `%${search}%` } },
+      castIlike('WalletTransaction', 'id', search),
+      castIlike('WalletTransaction', 'amount', search),
+      castIlike('WalletTransaction', 'booking_id', search),
+    ];
+    const dateCond = dateSearchCondition(search);
+    if (dateCond) orConditions.push(dateCond);
+    where[Op.and] = [{ [Op.or]: orConditions }];
+  }
 
   const rows = await WalletTransaction.findAll({
     where,
@@ -78,7 +107,7 @@ async function revenueReport(range, search) {
       { key: 'note', label: 'Note' },
     ],
     rows: rows.map((r) => ({
-      id: r.id, created_at: r.created_at, amount: round2(r.amount),
+      id: r.id, created_at: r.createdAt, amount: round2(r.amount),
       booking_id: r.booking_id, note: r.note,
     })),
     truncated: rows.length >= MAX_ROWS,
@@ -89,11 +118,17 @@ async function revenueReport(range, search) {
 async function bookingsReport(range, search) {
   const where = { created_at: range };
   if (search) {
-    where[Op.or] = [
+    const orConditions = [
       { title:           { [Op.iLike]: `%${search}%` } },
       { '$buyer.name$':  { [Op.iLike]: `%${search}%` } },
       { '$seller.name$': { [Op.iLike]: `%${search}%` } },
+      castIlike('Booking', 'id', search),
+      castIlike('Booking', 'amount', search),
+      castIlike('Booking', 'status', search),
     ];
+    const dateCond = dateSearchCondition(search);
+    if (dateCond) orConditions.push(dateCond);
+    where[Op.and] = [{ [Op.or]: orConditions }];
   }
 
   const rows = await Booking.findAll({
@@ -136,7 +171,7 @@ async function bookingsReport(range, search) {
     ],
     rows: rows.map((b) => ({
       id: b.id, title: b.title, buyer: b.buyer?.name || '-', seller: b.seller?.name || '-',
-      amount: round2(b.amount), status: b.status, created_at: b.created_at,
+      amount: round2(b.amount), status: b.status, created_at: b.createdAt,
     })),
     truncated: rows.length >= MAX_ROWS,
   };
@@ -146,15 +181,21 @@ async function bookingsReport(range, search) {
 async function usersReport(range, search) {
   const where = { role: { [Op.in]: ['SELLER', 'BUYER'] }, created_at: range };
   if (search) {
-    where[Op.or] = [
+    const orConditions = [
       { name:  { [Op.iLike]: `%${search}%` } },
       { email: { [Op.iLike]: `%${search}%` } },
+      castIlike('User', 'id', search),
+      castIlike('User', 'role', search),
+      castIlike('User', 'status', search),
     ];
+    const dateCond = dateSearchCondition(search);
+    if (dateCond) orConditions.push(dateCond);
+    where[Op.and] = [{ [Op.or]: orConditions }];
   }
 
   const rows = await User.findAll({
     where,
-    attributes: ['id', 'name', 'email', 'role', 'status', 'created_at'],
+    attributes: ['id', 'name', 'email', 'role', 'status', 'createdAt'],
     order: [['created_at', 'DESC']],
     limit: MAX_ROWS,
   });
@@ -181,7 +222,7 @@ async function usersReport(range, search) {
       { key: 'role', label: 'Role' }, { key: 'status', label: 'Status' }, { key: 'created_at', label: 'Joined' },
     ],
     rows: rows.map((u) => ({
-      id: u.id, name: u.name, email: u.email, role: u.role, status: u.status, created_at: u.created_at,
+      id: u.id, name: u.name, email: u.email, role: u.role, status: u.status, created_at: u.createdAt,
     })),
     truncated: rows.length >= MAX_ROWS,
   };
@@ -227,7 +268,15 @@ async function sellersReport(range, search) {
   // — so search filters this already-built plain-object array instead.
   if (search) {
     const q = search.toLowerCase();
-    rows = rows.filter((r) => r.name.toLowerCase().includes(q) || r.email.toLowerCase().includes(q));
+    rows = rows.filter((r) =>
+      r.name.toLowerCase().includes(q) ||
+      r.email.toLowerCase().includes(q) ||
+      String(r.seller_id).includes(q) ||
+      r.total_earnings.toFixed(2).includes(q) ||
+      String(r.payouts).includes(q) ||
+      r.rating.toFixed(2).includes(q) ||
+      String(r.total_reviews).includes(q)
+    );
   }
   rows = rows.slice(0, 100);
 
@@ -247,7 +296,17 @@ async function sellersReport(range, search) {
 // ── Wallet activity ───────────────────────────────────────────────────────
 async function walletReport(range, search) {
   const rowsWhere = { type: { [Op.in]: ['topup', 'withdrawal', 'platform_fee'] }, created_at: range };
-  if (search) rowsWhere.note = { [Op.iLike]: `%${search}%` };
+  if (search) {
+    const orConditions = [
+      { note: { [Op.iLike]: `%${search}%` } },
+      castIlike('WalletTransaction', 'id', search),
+      castIlike('WalletTransaction', 'type', search),
+      castIlike('WalletTransaction', 'amount', search),
+    ];
+    const dateCond = dateSearchCondition(search);
+    if (dateCond) orConditions.push(dateCond);
+    rowsWhere[Op.and] = [{ [Op.or]: orConditions }];
+  }
 
   const [topups, withdrawalsPaid, platformFee, rows] = await Promise.all([
     WalletTransaction.sum('amount', { where: { type: 'topup', created_at: range } }),
@@ -283,7 +342,7 @@ async function walletReport(range, search) {
       { key: 'note', label: 'Note' }, { key: 'created_at', label: 'Date' },
     ],
     rows: rows.map((r) => ({
-      id: r.id, type: r.type, amount: round2(r.amount), note: r.note, created_at: r.created_at,
+      id: r.id, type: r.type, amount: round2(r.amount), note: r.note, created_at: r.createdAt,
     })),
     truncated: rows.length >= MAX_ROWS,
   };
@@ -293,11 +352,16 @@ async function walletReport(range, search) {
 async function connectsReport(range, search) {
   const where = { created_at: range };
   if (search) {
-    where[Op.or] = [
+    const orConditions = [
       { note:             { [Op.iLike]: `%${search}%` } },
-      { type:             { [Op.iLike]: `%${search}%` } },
       { '$seller.name$':  { [Op.iLike]: `%${search}%` } },
+      castIlike('ConnectTransaction', 'id', search),
+      castIlike('ConnectTransaction', 'type', search),
+      castIlike('ConnectTransaction', 'amount', search),
     ];
+    const dateCond = dateSearchCondition(search);
+    if (dateCond) orConditions.push(dateCond);
+    where[Op.and] = [{ [Op.or]: orConditions }];
   }
 
   const rows = await ConnectTransaction.findAll({
@@ -331,7 +395,7 @@ async function connectsReport(range, search) {
     ],
     rows: rows.map((r) => ({
       id: r.id, seller: r.seller?.name || '-', type: r.type, amount: Number(r.amount),
-      note: r.note, created_at: r.created_at,
+      note: r.note, created_at: r.createdAt,
     })),
     truncated: rows.length >= MAX_ROWS,
   };

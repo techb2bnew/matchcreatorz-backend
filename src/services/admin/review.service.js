@@ -1,6 +1,6 @@
 'use strict';
 const { Review, User, Service, Booking } = require('../../models');
-const { Op, fn, col } = require('sequelize');
+const { Op, fn, col, literal } = require('sequelize');
 const { recalcSellerRating } = require('../buyer/review.service');
 
 // Whitelist of columns the grid may sort by, mapped to a Sequelize order path.
@@ -17,7 +17,30 @@ const SORT_FIELDS = {
 const listAllReviews = async ({ search, status, page = 1, limit = 20, sortBy, sortDir }) => {
   const where = {};
   if (status) where.status = status;
-  if (search) where.comment = { [Op.iLike]: `%${search}%` };
+  if (search) {
+    const term = String(search).trim();
+    const safe = term.replace(/'/g, "''");
+    where[Op.or] = [
+      { comment:            { [Op.iLike]: `%${term}%` } },
+      { '$buyer.name$':     { [Op.iLike]: `%${term}%` } },
+      { '$seller.name$':    { [Op.iLike]: `%${term}%` } },
+      { '$service.title$':  { [Op.iLike]: `%${term}%` } },
+      { '$booking.title$':  { [Op.iLike]: `%${term}%` } },
+      // `rating` is an integer and `status` is a Postgres ENUM — ILIKE needs
+      // an explicit ::text cast on both, or Postgres errors ("operator does not exist").
+      literal(`"Review"."rating"::text ILIKE '%${safe}%'`),
+      literal(`"Review"."status"::text ILIKE '%${safe}%'`),
+    ];
+
+    // Support matching by the date shown in the grid (e.g. "Aug 3, 2026").
+    const parsedDate = new Date(term);
+    if (!isNaN(parsedDate.getTime())) {
+      const dayStart = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate());
+      const dayEnd   = new Date(dayStart);
+      dayEnd.setDate(dayEnd.getDate() + 1);
+      where[Op.or].push({ created_at: { [Op.gte]: dayStart, [Op.lt]: dayEnd } });
+    }
+  }
 
   const sortPath  = SORT_FIELDS[sortBy] || SORT_FIELDS.date;
   const direction = sortDir === 'asc' ? 'ASC' : 'DESC';

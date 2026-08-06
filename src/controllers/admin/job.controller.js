@@ -32,7 +32,7 @@ const SORT_FIELDS = {
  *       - in: query
  *         name: search
  *         schema: { type: string }
- *         description: Search by title, description or category
+ *         description: Search by title, description, category, buyer name, skills, budget, bids, status, or date
  *       - in: query
  *         name: status
  *         schema: { type: string, enum: [OPEN, IN_PROGRESS, CLOSED, CANCELLED] }
@@ -58,13 +58,31 @@ exports.listJobs = async (req, res, next) => {
     const where = {};
     if (status) where.status = status;
     if (search) {
-      const safe = String(search).replace(/'/g, "''");
+      const term = String(search).trim();
+      const safe = term.replace(/'/g, "''");
       where[Op.or] = [
-        { title:       { [Op.iLike]: `%${search}%` } },
-        { description: { [Op.iLike]: `%${search}%` } },
-        { category:    { [Op.iLike]: `%${search}%` } },
+        { title:            { [Op.iLike]: `%${term}%` } },
+        { description:      { [Op.iLike]: `%${term}%` } },
+        { category:         { [Op.iLike]: `%${term}%` } },
+        { '$buyer.name$':   { [Op.iLike]: `%${term}%` } },
         literal(`CAST("Job"."skills" AS TEXT) ILIKE '%${safe}%'`),
+        // `status` is a Postgres ENUM and budget_min/max are numeric — ILIKE
+        // needs an explicit ::text cast on all three, or Postgres errors
+        // ("operator does not exist") rather than just not matching.
+        literal(`"Job"."status"::text ILIKE '%${safe}%'`),
+        literal(`"Job"."budget_min"::text ILIKE '%${safe}%'`),
+        literal(`"Job"."budget_max"::text ILIKE '%${safe}%'`),
+        literal(`"Job"."bids_count"::text ILIKE '%${safe}%'`),
       ];
+
+      // Support matching by the date shown in the grid (e.g. "Aug 3, 2026").
+      const parsedDate = new Date(term);
+      if (!isNaN(parsedDate.getTime())) {
+        const dayStart = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate());
+        const dayEnd   = new Date(dayStart);
+        dayEnd.setDate(dayEnd.getDate() + 1);
+        where[Op.or].push({ createdAt: { [Op.gte]: dayStart, [Op.lt]: dayEnd } });
+      }
     }
 
     const sortPath  = SORT_FIELDS[sortBy] || SORT_FIELDS.date;
@@ -86,6 +104,10 @@ exports.listJobs = async (req, res, next) => {
     const data = rows.map((r) => {
       const j = r.toJSON();
       j.description = stripHtml(j.description);
+      // Sequelize's JS attribute is `createdAt` even though the DB column
+      // (and this query's own `order`) is `created_at` — remap so the
+      // frontend's `created_at` field is actually populated instead of undefined.
+      j.created_at = r.createdAt;
       return j;
     });
 

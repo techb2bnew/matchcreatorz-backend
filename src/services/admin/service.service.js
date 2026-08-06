@@ -1,5 +1,5 @@
 'use strict';
-const { Op }       = require('sequelize');
+const { Op, literal } = require('sequelize');
 const { Service, Category, User, SellerProfile } = require('../../models/index');
 
 // Whitelist of columns the grid may sort by, mapped to a Sequelize order path.
@@ -20,7 +20,30 @@ const listServices = async ({ page = 1, limit = 10, search, status, category_id,
   const offset = (page - 1) * limit;
   const where  = {};
 
-  if (search)      where.title       = { [Op.iLike]: `%${search}%` };
+  if (search) {
+    const term = String(search).trim();
+    const safe = term.replace(/'/g, "''");
+    where[Op.or] = [
+      { title:              { [Op.iLike]: `%${term}%` } },
+      { '$seller.name$':    { [Op.iLike]: `%${term}%` } },
+      { '$category.name$':  { [Op.iLike]: `%${term}%` } },
+      // `price`/`orders_count` are numeric and `status` is a Postgres ENUM —
+      // ILIKE needs an explicit ::text cast on all three, or Postgres errors
+      // ("operator does not exist") rather than just not matching.
+      literal(`"Service"."price"::text ILIKE '%${safe}%'`),
+      literal(`"Service"."orders_count"::text ILIKE '%${safe}%'`),
+      literal(`"Service"."status"::text ILIKE '%${safe}%'`),
+    ];
+
+    // Support matching by the date shown in the grid (e.g. "Aug 3, 2026").
+    const parsedDate = new Date(term);
+    if (!isNaN(parsedDate.getTime())) {
+      const dayStart = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate());
+      const dayEnd   = new Date(dayStart);
+      dayEnd.setDate(dayEnd.getDate() + 1);
+      where[Op.or].push({ createdAt: { [Op.gte]: dayStart, [Op.lt]: dayEnd } });
+    }
+  }
   if (status)      where.status      = status;
   if (category_id) where.category_id = category_id;
 
