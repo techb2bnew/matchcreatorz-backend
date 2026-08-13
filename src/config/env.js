@@ -71,6 +71,9 @@ const env = {
   PLATFORM_FEE_PERCENT: parseFloat(process.env.PLATFORM_FEE_PERCENT || '10'), // % taken by platform on completed bookings
   MIN_WITHDRAW:         parseFloat(process.env.MIN_WITHDRAW || '50'),         // minimum seller withdrawal
   WALLET_CURRENCY:      (process.env.WALLET_CURRENCY || 'usd').toLowerCase(),
+
+  // Google Maps / Places (address lookup — not yet wired into any endpoint)
+  GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY || '',
 };
 
 // Validate critical vars in production

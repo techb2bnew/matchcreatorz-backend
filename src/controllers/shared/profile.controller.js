@@ -37,7 +37,7 @@ const { fields: validationFields } = require('../../helpers/validation.helper');
  *               name:     { type: string, example: "Admin User" }
  *               phone:    { type: string, example: "9876543210" }
  *               bio:      { type: string }
- *               location: { type: string, example: "Delhi, India" }
+ *               address:  { type: string, example: "12 MG Road, Delhi, India" }
  *     responses:
  *       200: { description: Profile updated }
  *
@@ -80,7 +80,7 @@ const { fields: validationFields } = require('../../helpers/validation.helper');
  *               name:     { type: string }
  *               phone:    { type: string }
  *               bio:      { type: string }
- *               location: { type: string }
+ *               address:  { type: string }
  *     responses:
  *       200: { description: Profile updated }
  *
@@ -122,7 +122,7 @@ const { fields: validationFields } = require('../../helpers/validation.helper');
  *               name:     { type: string }
  *               phone:    { type: string }
  *               bio:      { type: string }
- *               location: { type: string }
+ *               address:  { type: string }
  *     responses:
  *       200: { description: Profile updated }
  *
@@ -146,7 +146,7 @@ const { fields: validationFields } = require('../../helpers/validation.helper');
  */
 
 // Safe fields to return (never expose password/OTP)
-const SAFE_FIELDS = ['id','name','email','phone','role','status','is_verified','bio','location','avatar','created_at'];
+const SAFE_FIELDS = ['id','name','email','phone','role','status','is_verified','bio','address','avatar','created_at'];
 
 /**
  * @swagger
@@ -195,7 +195,7 @@ const getProfile = async (req, res, next) => {
  *               name:     { type: string,  example: "John Doe" }
  *               phone:    { type: string,  example: "9876543210" }
  *               bio:      { type: string,  example: "Creative designer with 5 years experience" }
- *               location: { type: string,  example: "Mumbai, India" }
+ *               address:  { type: string,  example: "221B Baker Street, Mumbai, India" }
  *               avatar:   { type: string,  example: "https://..." }
  *     responses:
  *       200:
@@ -203,7 +203,7 @@ const getProfile = async (req, res, next) => {
  */
 const updateProfile = async (req, res, next) => {
   try {
-    const { name, phone, bio, location, avatar } = req.body;
+    const { name, phone, bio, address, avatar } = req.body;
 
     const user = await User.findByPk(req.user.id);
     if (!user) return response.notFound(res, 'User not found');
@@ -218,7 +218,7 @@ const updateProfile = async (req, res, next) => {
     if (name     !== undefined) user.name     = clean(name);
     if (phone    !== undefined) user.phone    = cleanPhone;
     if (bio      !== undefined) user.bio      = clean(bio);
-    if (location !== undefined) user.location = clean(location);
+    if (address  !== undefined) user.address  = clean(address);
     if (avatar   !== undefined) user.avatar   = clean(avatar);
 
     await user.save();

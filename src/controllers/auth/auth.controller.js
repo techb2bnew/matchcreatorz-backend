@@ -56,14 +56,10 @@ const { authSchemas } = require('../../helpers/validation.helper');
  *           type: number
  *           description: "✅ Required if role=SELLER | rate in INR"
  *           example: 500
- *         city:
+ *         address:
  *           type: string
  *           description: "✅ Required if role=SELLER | Optional for BUYER"
- *           example: Mumbai
- *         country:
- *           type: string
- *           description: "✅ Required if role=SELLER | Optional for BUYER"
- *           example: India
+ *           example: "221B Baker Street, Mumbai, India"
  *         bio:
  *           type: string
  *           maxLength: 500

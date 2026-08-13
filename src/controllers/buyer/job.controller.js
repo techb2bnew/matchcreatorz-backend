@@ -20,7 +20,7 @@ const BUYER_ATTRS = ['id', 'name', 'email'];
  *       - in: query
  *         name: search
  *         schema: { type: string }
- *         description: Case-insensitive search by job title or description (uses iLike)
+ *         description: Case-insensitive search by job title, description, category, skills, or budget
  *       - in: query
  *         name: status
  *         schema: { type: string, enum: [OPEN, IN_PROGRESS, CLOSED, CANCELLED] }
@@ -56,6 +56,9 @@ exports.listMyJobs = async (req, res) => {
         { category:    { [Op.iLike]: `%${term}%` } },
         // searchable skills (JSON array) — cast to text and match
         literal(`CAST("Job"."skills" AS TEXT) ILIKE '%${safe}%'`),
+        // budget_min/max are DECIMAL — Postgres rejects ILIKE on them directly, cast to text first
+        literal(`"Job"."budget_min"::text ILIKE '%${safe}%'`),
+        literal(`"Job"."budget_max"::text ILIKE '%${safe}%'`),
       ];
     }
 

@@ -23,13 +23,8 @@ const BuyerProfile = sequelize.define('BuyerProfile', {
     allowNull: true,
   },
 
-  city: {
-    type:      DataTypes.STRING(100),
-    allowNull: true,
-  },
-
-  country: {
-    type:      DataTypes.STRING(100),
+  address: {
+    type:      DataTypes.TEXT,
     allowNull: true,
   },
 

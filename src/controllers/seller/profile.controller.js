@@ -4,7 +4,7 @@ const SellerProfile = require('../../models/sellerProfile.model');
 const response      = require('../../helpers/response.helper');
 const { fields: validationFields } = require('../../helpers/validation.helper');
 
-const SAFE_USER = ['id','name','email','phone','role','status','is_verified','bio','location','avatar','created_at'];
+const SAFE_USER = ['id','name','email','phone','role','status','is_verified','bio','address','avatar','created_at'];
 
 /**
  * @swagger
@@ -27,15 +27,14 @@ const SAFE_USER = ['id','name','email','phone','role','status','is_verified','bi
  *                 email:      { type: string }
  *                 phone:      { type: string }
  *                 bio:        { type: string }
- *                 location:   { type: string }
+ *                 address:    { type: string }
  *                 avatar:     { type: string }
  *                 seller_profile:
  *                   type: object
  *                   properties:
  *                     skills:          { type: array, items: { type: string } }
  *                     hourly_rate:     { type: number }
- *                     city:            { type: string }
- *                     country:         { type: string }
+ *                     address:         { type: string }
  *                     resume:          { type: string }
  *                     portfolio_links: { type: array, items: { type: string } }
  *                     portfolio_files: { type: array, items: { type: string } }
@@ -75,12 +74,10 @@ const getSellerProfile = async (req, res, next) => {
  *               name:            { type: string, example: "Alex Johnson" }
  *               phone:           { type: string, example: "+919876543210" }
  *               bio:             { type: string, example: "Experienced video editor" }
- *               location:        { type: string, example: "Mumbai, India" }
+ *               address:         { type: string, example: "221B Baker Street, Mumbai, India" }
  *               avatar:          { type: string, example: "https://..." }
  *               skills:          { type: array,  items: { type: string }, example: ["Video Editing", "Motion Graphics"] }
  *               hourly_rate:     { type: number, example: 500 }
- *               city:            { type: string, example: "Mumbai" }
- *               country:         { type: string, example: "India" }
  *               resume:          { type: string, example: "https://s3.amazonaws.com/resumes/..." }
  *               portfolio_links: { type: array,  items: { type: string } }
  *               portfolio_files: { type: array,  items: { type: string } }
@@ -91,8 +88,8 @@ const getSellerProfile = async (req, res, next) => {
 const updateSellerProfile = async (req, res, next) => {
   try {
     const {
-      name, phone, bio, location, avatar,
-      skills, hourly_rate, city, country,
+      name, phone, bio, address, avatar,
+      skills, hourly_rate,
       resume, portfolio_links, portfolio_files,
     } = req.body;
 
@@ -107,7 +104,7 @@ const updateSellerProfile = async (req, res, next) => {
     if (name     !== undefined) user.name     = name.trim();
     if (phone    !== undefined) user.phone    = cleanPhone;
     if (bio      !== undefined) user.bio      = bio.trim();
-    if (location !== undefined) user.location = location.trim();
+    if (address  !== undefined) user.address  = address.trim();
     if (avatar   !== undefined) user.avatar   = avatar.trim();
     await user.save();
 
@@ -117,8 +114,9 @@ const updateSellerProfile = async (req, res, next) => {
 
     if (skills          !== undefined) profile.skills          = Array.isArray(skills) ? skills : [];
     if (hourly_rate     !== undefined) profile.hourly_rate     = hourly_rate;
-    if (city            !== undefined) profile.city            = city ? city.trim() : null;
-    if (country         !== undefined) profile.country         = country ? country.trim() : null;
+    // Kept in sync with User.address so admin listings (which read from
+    // SellerProfile, not User) show the same address without a join.
+    if (address         !== undefined) profile.address         = address ? address.trim() : null;
     if (resume          !== undefined) profile.resume          = resume ? resume.trim() : null;
     if (portfolio_links !== undefined) profile.portfolio_links = Array.isArray(portfolio_links) ? portfolio_links : [];
     if (portfolio_files !== undefined) profile.portfolio_files = Array.isArray(portfolio_files) ? portfolio_files : [];

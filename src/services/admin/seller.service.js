@@ -8,7 +8,7 @@ const notify                  = require('../../helpers/notification.helper');
 const sellerInclude = {
   model:      SellerProfile,
   as:         'sellerProfile',
-  attributes: ['id','bio','skills','hourly_rate','city','country','profile_image',
+  attributes: ['id','bio','skills','hourly_rate','address','profile_image',
                 'resume','portfolio_files','portfolio_links','rating','total_reviews',
                 'connects_balance','is_available','approval_status'],
 };
@@ -126,20 +126,19 @@ const getSellerById = async (id) => {
 };
 
 // ── Add seller ────────────────────────────────────────────────────────
-const addSeller = async ({ name, email, password, phone, bio, skills, hourly_rate, city, country, company_name }) => {
+const addSeller = async ({ name, email, password, phone, bio, skills, hourly_rate, address, company_name }) => {
   const existing = await User.findOne({ where: { email } });
   if (existing) throw { statusCode: 409, message: 'Email already registered' };
 
   const hashed = await bcrypt.hash(password, 12);
-  const user   = await User.create({ name, email, password: hashed, phone: phone || null, role: 'SELLER', status: 'active', is_verified: true });
+  const user   = await User.create({ name, email, password: hashed, phone: phone || null, role: 'SELLER', status: 'active', is_verified: true, address: address || null });
 
   await SellerProfile.create({
     user_id:         user.id,
     bio:             bio        || null,
     skills:          skills     || [],
     hourly_rate:     hourly_rate|| 0,
-    city:            city       || null,
-    country:         country    || null,
+    address:         address    || null,
     approval_status: 'approved',
   });
 
@@ -156,18 +155,17 @@ const editSeller = async (id, data) => {
   const user = await User.findOne({ where: { id, role: 'SELLER' }, include: [sellerInclude] });
   if (!user) throw { statusCode: 404, message: 'Seller not found' };
 
-  const { name, phone, status, bio, skills, hourly_rate, city, country, is_available } = data;
+  const { name, phone, status, bio, skills, hourly_rate, address, is_available } = data;
 
-  if (name || phone || status) {
-    await user.update({ name: name||user.name, phone: phone||user.phone, ...(status && { status }) });
+  if (name || phone || status || address !== undefined) {
+    await user.update({ name: name||user.name, phone: phone||user.phone, ...(status && { status }), ...(address !== undefined && { address }) });
   }
   if (user.sellerProfile) {
     await user.sellerProfile.update({
       ...(bio          !== undefined && { bio }),
       ...(skills       !== undefined && { skills }),
       ...(hourly_rate  !== undefined && { hourly_rate }),
-      ...(city         !== undefined && { city }),
-      ...(country      !== undefined && { country }),
+      ...(address      !== undefined && { address }),
       ...(is_available !== undefined && { is_available }),
     });
   }

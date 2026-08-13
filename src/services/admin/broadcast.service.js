@@ -1,7 +1,24 @@
 'use strict';
-const { Op } = require('sequelize');
+const { Op, literal } = require('sequelize');
 const { User, Broadcast } = require('../../models');
 const notify = require('../../helpers/notification.helper');
+
+// `literal(...)` for ILIKE against a numeric/ENUM column, which Postgres
+// otherwise rejects outright ("operator does not exist") rather than just
+// returning no matches.
+const castIlike = (col, term) =>
+  literal(`"Broadcast"."${col}"::text ILIKE '%${term.replace(/'/g, "''")}%'`);
+
+// A date-range OR condition for `created_at` when `term` parses as a date
+// (e.g. "Aug 3, 2026", matching what the grid displays).
+function dateSearchCondition(term) {
+  const parsedDate = new Date(term);
+  if (isNaN(parsedDate.getTime())) return null;
+  const dayStart = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate());
+  const dayEnd   = new Date(dayStart);
+  dayEnd.setDate(dayEnd.getDate() + 1);
+  return { createdAt: { [Op.gte]: dayStart, [Op.lt]: dayEnd } };
+}
 
 const AUDIENCE_ROLES = { ALL: ['SELLER', 'BUYER'], SELLER: ['SELLER'], BUYER: ['BUYER'] };
 
@@ -52,9 +69,15 @@ exports.listBroadcasts = async ({ page = 1, limit = 20, search, sortBy, sortDir 
   const where = {};
   if (search && String(search).trim()) {
     const term = String(search).trim();
+    const safe = term.replace(/'/g, "''");
+    const dateCond = dateSearchCondition(term);
     where[Op.or] = [
       { title: { [Op.iLike]: `%${term}%` } },
       { body:  { [Op.iLike]: `%${term}%` } },
+      castIlike('audience', safe),
+      castIlike('recipient_count', safe),
+      { '$admin.name$': { [Op.iLike]: `%${term}%` } },
+      ...(dateCond ? [dateCond] : []),
     ];
   }
 

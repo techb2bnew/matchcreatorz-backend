@@ -82,8 +82,8 @@ const User = sequelize.define('User', {
     allowNull: true,
   },
 
-  location: {
-    type:      DataTypes.STRING(150),
+  address: {
+    type:      DataTypes.TEXT,
     allowNull: true,
   },
 

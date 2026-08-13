@@ -7,7 +7,7 @@ const notify                 = require('../../helpers/notification.helper');
 const buyerInclude = {
   model:      BuyerProfile,
   as:         'buyerProfile',
-  attributes: ['id','company_name','city','country','profile_image','approval_status'],
+  attributes: ['id','company_name','address','profile_image','approval_status'],
 };
 
 // Whitelist of columns the grid may sort by, mapped to a Sequelize order path.
@@ -165,18 +165,17 @@ const getBuyerById = async (id) => {
 };
 
 // ── Add buyer ─────────────────────────────────────────────────────────
-const addBuyer = async ({ name, email, password, phone, company_name, city, country }) => {
+const addBuyer = async ({ name, email, password, phone, company_name, address }) => {
   const existing = await User.findOne({ where: { email } });
   if (existing) throw { statusCode: 409, message: 'Email already registered' };
 
   const hashed = await bcrypt.hash(password, 12);
-  const user   = await User.create({ name, email, password: hashed, phone: phone || null, role: 'BUYER', status: 'active', is_verified: true });
+  const user   = await User.create({ name, email, password: hashed, phone: phone || null, role: 'BUYER', status: 'active', is_verified: true, address: address || null });
 
   await BuyerProfile.create({
     user_id:      user.id,
     company_name: company_name || null,
-    city:         city         || null,
-    country:      country      || null,
+    address:      address      || null,
   });
 
   // Send welcome email with credentials (fire-and-forget)
@@ -192,16 +191,15 @@ const editBuyer = async (id, data) => {
   const user = await User.findOne({ where: { id, role: 'BUYER' }, include: [buyerInclude] });
   if (!user) throw { statusCode: 404, message: 'Buyer not found' };
 
-  const { name, phone, status, company_name, city, country } = data;
+  const { name, phone, status, company_name, address } = data;
 
-  if (name || phone || status) {
-    await user.update({ name: name||user.name, phone: phone||user.phone, ...(status && { status }) });
+  if (name || phone || status || address !== undefined) {
+    await user.update({ name: name||user.name, phone: phone||user.phone, ...(status && { status }), ...(address !== undefined && { address }) });
   }
   if (user.buyerProfile) {
     await user.buyerProfile.update({
       ...(company_name !== undefined && { company_name }),
-      ...(city         !== undefined && { city }),
-      ...(country      !== undefined && { country }),
+      ...(address      !== undefined && { address }),
     });
   }
   return getBuyerById(id);

@@ -103,8 +103,7 @@ const getSellerById = async (req, res, next) => {
  *               bio:         { type: string }
  *               skills:      { type: array, items: { type: string }, example: ["React", "Node.js"] }
  *               hourly_rate: { type: number, example: 800 }
- *               city:        { type: string, example: "Mumbai" }
- *               country:     { type: string, example: "India" }
+ *               address:     { type: string, example: "221B Baker Street, Mumbai, India" }
  *     responses:
  *       201:
  *         description: Seller created
@@ -143,8 +142,7 @@ const addSeller = async (req, res, next) => {
  *               bio:          { type: string }
  *               skills:       { type: array, items: { type: string } }
  *               hourly_rate:  { type: number }
- *               city:         { type: string }
- *               country:      { type: string }
+ *               address:      { type: string }
  *               is_available: { type: boolean }
  *               status:       { type: string, enum: [active, inactive, banned] }
  *     responses:

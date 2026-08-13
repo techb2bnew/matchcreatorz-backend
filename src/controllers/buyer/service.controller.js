@@ -14,7 +14,7 @@ const response                           = require('../../helpers/response.helpe
  *       - in: query
  *         name: search
  *         schema: { type: string }
- *         description: Case-insensitive search in title, description, tags, seller name
+ *         description: Case-insensitive search in title, description, tags, seller name, or price
  *       - in: query
  *         name: category
  *         schema: { type: string }
@@ -73,6 +73,8 @@ exports.searchServices = async (req, res) => {
         { '$seller.name$':  { [Op.iLike]: `%${term}%` } },
         // searchable tags (tags stored as JSONB array of strings)
         literal(`EXISTS (SELECT 1 FROM jsonb_array_elements_text("Service"."tags") t WHERE t ILIKE '%${safe}%')`),
+        // price is DECIMAL — Postgres rejects ILIKE on it directly, cast to text first
+        literal(`"Service"."price"::text ILIKE '%${safe}%'`),
       ];
     }
 

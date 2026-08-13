@@ -52,7 +52,7 @@ const register = async (data) => {
   const {
     name, email, password, phone, role,
     // seller fields
-    bio, skills, hourly_rate, city, country, profile_image,
+    bio, skills, hourly_rate, address, profile_image,
     resume_url, portfolio_file_urls, portfolio_links,
     // buyer fields
     company_name,
@@ -90,8 +90,7 @@ const register = async (data) => {
       bio:             bio                  || null,
       skills:          skills               || [],
       hourly_rate:     hourly_rate          || 0,
-      city:            city                 || null,
-      country:         country              || null,
+      address:         address              || null,
       profile_image:   profile_image        || null,
       resume:          resume_url           || null,
       portfolio_files: portfolio_file_urls  || [],
@@ -101,8 +100,7 @@ const register = async (data) => {
     await BuyerProfile.create({
       user_id:         user.id,
       company_name:    company_name  || null,
-      city:            city          || null,
-      country:         country       || null,
+      address:         address       || null,
       profile_image:   profile_image || null,
       approval_status: 'pending',
     });
@@ -297,9 +295,12 @@ const resendPhoneOtp = async ({ phone }) => {
 
   await user.update({ phone_otp: otp, phone_otp_expiry: otp_expiry });
 
-  sendSmsOtp(phone, otp).catch(err =>
-    console.error('⚠️  SMS OTP failed:', err.message)
-  );
+  try {
+    await sendSmsOtp(phone, otp);
+  } catch (err) {
+    console.error('⚠️  SMS OTP failed:', err.message);
+    throw { statusCode: 502, message: 'Could not send OTP — SMS provider error. Please try again shortly.' };
+  }
 
   return true;
 };
@@ -331,9 +332,12 @@ const forgotPasswordByPhone = async ({ email, phone }) => {
   const otp = generateOtp();
   await user.update({ phone_otp: otp, phone_otp_expiry: expiry });
 
-  sendSmsOtp(phone, otp).catch(err =>
-    console.error('⚠️  SMS OTP failed:', err.message)
-  );
+  try {
+    await sendSmsOtp(phone, otp);
+  } catch (err) {
+    console.error('⚠️  SMS OTP failed:', err.message);
+    throw { statusCode: 502, message: 'Could not send OTP — SMS provider error. Please try again shortly.' };
+  }
   return { via: 'phone' };
 };
 

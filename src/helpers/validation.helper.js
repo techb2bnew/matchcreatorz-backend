@@ -48,18 +48,11 @@ const authSchemas = {
       otherwise: Joi.number().min(0).optional(),
     }),
 
-    city: Joi.when('role', {
+    address: Joi.when('role', {
       is:        'SELLER',
-      then:      Joi.string().max(100).required()
-                   .messages({ 'any.required': 'city is required for sellers' }),
-      otherwise: Joi.string().max(100).optional(),
-    }),
-
-    country: Joi.when('role', {
-      is:        'SELLER',
-      then:      Joi.string().max(100).required()
-                   .messages({ 'any.required': 'country is required for sellers' }),
-      otherwise: Joi.string().max(100).optional(),
+      then:      Joi.string().max(255).required()
+                   .messages({ 'any.required': 'address is required for sellers' }),
+      otherwise: Joi.string().max(255).optional(),
     }),
 
     // ── Seller: optional ──────────────────────────
@@ -135,8 +128,7 @@ const sellerSchemas = {
     skills:      Joi.array().items(Joi.string()).optional(),
     hourlyRate:  Joi.number().min(0).optional(),
     category:    Joi.string().optional(),
-    city:        Joi.string().optional(),
-    country:     Joi.string().optional(),
+    address:     Joi.string().max(255).optional(),
   }),
 
   createService: Joi.object({

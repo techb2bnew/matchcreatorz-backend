@@ -1,5 +1,5 @@
 'use strict';
-const { Op } = require('sequelize');
+const { Op, literal } = require('sequelize');
 const { sequelize, Wallet, WalletTransaction } = require('../../models');
 const env = require('../../config/env');
 
@@ -93,7 +93,12 @@ const listTransactions = async (userId, { page = 1, limit = 20, type, search } =
 
   if (search && String(search).trim()) {
     const term = String(search).trim();
-    const orConditions = [{ note: { [Op.iLike]: `%${term}%` } }];
+    const safe = term.replace(/'/g, "''");
+    const orConditions = [
+      { note: { [Op.iLike]: `%${term}%` } },
+      // amount is DECIMAL — Postgres rejects ILIKE on it directly, cast to text first
+      literal(`"WalletTransaction"."amount"::text ILIKE '%${safe}%'`),
+    ];
 
     // A type whose human-readable label matches the search term (e.g. searching
     // "top-up" should find rows with no note but type='topup').

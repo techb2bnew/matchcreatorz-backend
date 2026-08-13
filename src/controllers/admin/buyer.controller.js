@@ -101,8 +101,7 @@ const getBuyerById = async (req, res, next) => {
  *               password:     { type: string, example: "Password@123" }
  *               phone:        { type: string, example: "+919876543210" }
  *               company_name: { type: string, example: "ABC Pvt Ltd" }
- *               city:         { type: string, example: "Delhi" }
- *               country:      { type: string, example: "India" }
+ *               address:      { type: string, example: "12 MG Road, Delhi, India" }
  *     responses:
  *       201:
  *         description: Buyer created
@@ -139,8 +138,7 @@ const addBuyer = async (req, res, next) => {
  *               name:         { type: string }
  *               phone:        { type: string }
  *               company_name: { type: string }
- *               city:         { type: string }
- *               country:      { type: string }
+ *               address:      { type: string }
  *               status:       { type: string, enum: [active, inactive, banned] }
  *     responses:
  *       200:

@@ -46,7 +46,7 @@ const response = require('../../helpers/response.helper');
  *       - in: query
  *         name: search
  *         schema: { type: string }
- *         description: Search by title or message body
+ *         description: Search by title, message body, audience, recipient count, sent-by admin name, or date
  *       - in: query
  *         name: sortBy
  *         schema: { type: string, enum: [title, audience, recipients, date, sentBy], default: date }
