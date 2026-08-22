@@ -11,5 +11,6 @@ router.use('/wallet',     require('./wallet'));
 router.use('/categories', require('./categories'));
 router.use('/public',     require('./publicStats'));
 router.use('/pages',      require('./pages'));
+router.use('/banners',    require('./banners'));
 
 module.exports = router;

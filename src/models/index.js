@@ -9,6 +9,7 @@ const Job           = require('./job.model');
 const Bid           = require('./bid.model');
 const Booking       = require('./booking.model');
 const BookingMilestone = require('./bookingMilestone.model');
+const BookingWorkEntry = require('./bookingWorkEntry.model');
 const Review        = require('./review.model');
 const Notification  = require('./notification.model');
 const Favourite     = require('./favourite.model');
@@ -74,6 +75,10 @@ Booking.belongsTo(Job, { foreignKey: 'job_id', as: 'job' });
 Booking.hasMany(BookingMilestone, { foreignKey: 'booking_id', as: 'milestones', onDelete: 'CASCADE' });
 BookingMilestone.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
 
+// Booking ↔ Work Entries (1:many) — hourly per-day submissions
+Booking.hasMany(BookingWorkEntry, { foreignKey: 'booking_id', as: 'workEntries', onDelete: 'CASCADE' });
+BookingWorkEntry.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
+
 // Review associations
 User.hasMany(Review, { foreignKey: 'buyer_id',  as: 'givenReviews'    });
 Review.belongsTo(User, { foreignKey: 'buyer_id',  as: 'buyer'  });
@@ -135,6 +140,7 @@ Wallet.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 User.hasMany(WalletTransaction, { foreignKey: 'user_id', as: 'walletTransactions' });
 WalletTransaction.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 WalletTransaction.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
+WalletTransaction.belongsTo(BookingWorkEntry, { foreignKey: 'work_entry_id', as: 'workEntry' });
 
 // Withdrawals (seller cash-out)
 User.hasMany(Withdrawal, { foreignKey: 'seller_id', as: 'withdrawals' });
@@ -161,6 +167,7 @@ const db = {
   Bid,
   Booking,
   BookingMilestone,
+  BookingWorkEntry,
   Review,
   Notification,
   Favourite,

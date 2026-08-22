@@ -143,6 +143,108 @@ exports.rejectWork = async (req, res, next) => {
 
 /**
  * @swagger
+ * /api/v1/buyer/bookings/{id}/work-entries/{entryId}/approve:
+ *   patch:
+ *     summary: Approve a logged work entry (pays the seller at its full hours)
+ *     tags: [Buyer - Bookings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *       - in: path
+ *         name: entryId
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: Entry approved and paid }
+ *       400: { description: Entry is not pending }
+ *       404: { description: Not found }
+ *       409: { description: Entry was already processed (duplicate/retry) }
+ */
+exports.approveWorkEntry = async (req, res, next) => {
+  try {
+    const data = await svc.approveWorkEntry(req.user.id, req.params.id, req.params.entryId);
+    return response.success(res, 'Work entry approved and paid', data);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
+ * /api/v1/buyer/bookings/{id}/work-entries/{entryId}/counter:
+ *   patch:
+ *     summary: Counter a work entry — propose paying for fewer hours than logged
+ *     tags: [Buyer - Bookings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *       - in: path
+ *         name: entryId
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [counter_hours]
+ *             properties:
+ *               counter_hours: { type: number, example: 3 }
+ *               counter_note:  { type: string }
+ *     responses:
+ *       200: { description: Counter sent to seller }
+ *       400: { description: Entry not pending / counter exceeds logged hours }
+ *       404: { description: Not found }
+ */
+exports.counterWorkEntry = async (req, res, next) => {
+  try {
+    const data = await svc.counterWorkEntry(req.user.id, req.params.id, req.params.entryId, req.body);
+    return response.success(res, 'Counter sent to seller', data);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
+ * /api/v1/buyer/bookings/{id}/work-entries/{entryId}/dispute:
+ *   patch:
+ *     summary: Dispute a work entry (escalates to admin — only this entry, not the whole booking)
+ *     tags: [Buyer - Bookings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *       - in: path
+ *         name: entryId
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               dispute_reason: { type: string }
+ *     responses:
+ *       200: { description: Entry moved to dispute }
+ *       400: { description: Entry already resolved }
+ *       404: { description: Not found }
+ */
+exports.disputeWorkEntry = async (req, res, next) => {
+  try {
+    const data = await svc.disputeWorkEntry(req.user.id, req.params.id, req.params.entryId, req.body.dispute_reason);
+    return response.success(res, 'Entry moved to dispute', data);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
  * /api/v1/buyer/bookings/{id}/cancel:
  *   patch:
  *     summary: Cancel a booking (pending or ongoing only)
@@ -232,5 +334,43 @@ exports.rejectMilestone = async (req, res, next) => {
   try {
     const data = await svc.rejectMilestone(req.user.id, req.params.id, req.params.milestoneId, req.body.dispute_reason);
     return response.success(res, 'Milestone rejected', data);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
+ * /api/v1/buyer/bookings/{id}/milestones/{milestoneId}/counter:
+ *   patch:
+ *     summary: Counter a milestone — propose paying a different amount than submitted
+ *     tags: [Buyer - Bookings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *       - in: path
+ *         name: milestoneId
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [counter_amount]
+ *             properties:
+ *               counter_amount: { type: number, example: 100 }
+ *               counter_note:   { type: string }
+ *     responses:
+ *       200: { description: Counter sent to seller }
+ *       400: { description: Milestone not submitted / counter exceeds submitted amount }
+ *       404: { description: Not found }
+ */
+exports.counterMilestone = async (req, res, next) => {
+  try {
+    const data = await svc.counterMilestone(req.user.id, req.params.id, req.params.milestoneId, req.body);
+    return response.success(res, 'Counter sent to seller', data);
   } catch (err) { next(err); }
 };

@@ -3,9 +3,13 @@ const bcrypt   = require('bcryptjs');
 const jwt      = require('jsonwebtoken');
 const env      = require('../../config/env');
 const { User, SellerProfile, BuyerProfile } = require('../../models/index');
-const { sendOtp }    = require('../../helpers/email.helper');
-const { sendSmsOtp } = require('../../helpers/sms.helper');
-const notify         = require('../../helpers/notification.helper');
+const { sendOtp }                = require('../../helpers/email.helper');
+const { sendPhoneOtp, checkPhoneOtp } = require('../../helpers/twilio.helper');
+const notify                     = require('../../helpers/notification.helper');
+
+// Loosely normalize a phone number for comparison — strips everything but
+// digits and a leading '+', so spacing/formatting differences don't matter.
+const normalizePhone = (p) => String(p || '').replace(/[^\d+]/g, '');
 
 const { OAuth2Client } = require('google-auth-library');
 const crypto           = require('crypto');
@@ -47,10 +51,19 @@ const generateOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 const signToken = (payload) =>
   jwt.sign(payload, env.JWT_SECRET, { expiresIn: env.JWT_EXPIRES_IN });
 
+// ── Phone-verify token ────────────────────────────────────────────────
+// Short-lived proof that a phone number passed a Twilio Verify check —
+// bridges the gap between the signup form's "Verify" step (step 1) and
+// the actual account creation (submitted later, after steps 2/3).
+const signPhoneVerifyToken = (phone) =>
+  jwt.sign({ phone }, env.JWT_SECRET, { expiresIn: '15m' });
+
+const verifyPhoneVerifyToken = (token) => jwt.verify(token, env.JWT_SECRET);
+
 // ── Register ──────────────────────────────────────────────────────────
 const register = async (data) => {
   const {
-    name, email, password, phone, role,
+    name, email, password, phone, role, phoneVerifyToken,
     // seller fields
     bio, skills, hourly_rate, address, profile_image,
     resume_url, portfolio_file_urls, portfolio_links,
@@ -69,6 +82,25 @@ const register = async (data) => {
     throw { statusCode: 409, message: 'Email already registered' };
   }
 
+  // 1b. If a phone was entered, it must already be verified client-side via
+  // the Twilio Verify OTP flow — check the resulting token server-side and
+  // cross-check the phone number it was issued for actually matches what
+  // was submitted.
+  let isPhoneVerified = false;
+  if (phone) {
+    if (!phoneVerifyToken)
+      throw { statusCode: 400, message: 'Phone must be verified before registering' };
+    let decoded;
+    try {
+      decoded = verifyPhoneVerifyToken(phoneVerifyToken);
+    } catch (err) {
+      throw { statusCode: 400, message: 'Phone verification expired — please verify again' };
+    }
+    if (normalizePhone(decoded.phone) !== normalizePhone(phone))
+      throw { statusCode: 400, message: 'Verified phone number does not match the phone entered' };
+    isPhoneVerified = true;
+  }
+
   // 2. Hash password
   const hashed = await bcrypt.hash(password, 12);
 
@@ -81,6 +113,7 @@ const register = async (data) => {
     role,
     status:      'active',
     is_verified: false,
+    is_phone_verified: isPhoneVerified,
   });
 
   // 4. Create role-specific profile with fields
@@ -106,15 +139,12 @@ const register = async (data) => {
     });
   }
 
-  // 5. Generate Email OTP → save → send
+  // 5. Generate Email OTP → save → send (phone, if present, is already
+  // verified above via Firebase — no separate phone OTP round-trip needed)
   const otp        = generateOtp();
   const otp_expiry = new Date(Date.now() + env.OTP_EXPIRES_MIN * 60 * 1000);
 
-  // Generate Phone OTP if phone provided
-  const phone_otp        = phone ? generateOtp() : null;
-  const phone_otp_expiry = phone ? new Date(Date.now() + env.OTP_EXPIRES_MIN * 60 * 1000) : null;
-
-  await user.update({ otp, otp_expiry, phone_otp, phone_otp_expiry });
+  await user.update({ otp, otp_expiry });
 
   // Fire-and-forget — don't fail registration if notifications fail
   notify.welcome(user);
@@ -124,12 +154,6 @@ const register = async (data) => {
   sendOtp(user.email, user.name, otp).catch(err =>
     console.error('⚠️  OTP email failed:', err.message)
   );
-
-  if (phone) {
-    sendSmsOtp(phone, phone_otp).catch(err =>
-      console.error('⚠️  SMS OTP failed:', err.message)
-    );
-  }
 
   // 6. Generate token
   const token = signToken({ id: user.id, email: user.email, role: user.role });
@@ -264,124 +288,77 @@ const logout = async () => {
   return true;
 };
 
-// ── Verify Phone OTP ──────────────────────────────────────────────────
-const verifyPhoneOtp = async ({ phone, otp }) => {
-  const user = await User.findOne({ where: { phone } });
-  if (!user) throw { statusCode: 404, message: 'Phone number not found' };
-  if (user.is_phone_verified) throw { statusCode: 400, message: 'Phone already verified' };
-
-  if (!user.phone_otp || !user.phone_otp_expiry)
-    throw { statusCode: 400, message: 'OTP not found. Please request a new one' };
-
-  if (new Date() > new Date(user.phone_otp_expiry))
-    throw { statusCode: 400, message: 'OTP expired. Please request a new one' };
-
-  if (user.phone_otp !== String(otp))
-    throw { statusCode: 400, message: 'Invalid OTP' };
-
-  await user.update({ is_phone_verified: true, phone_otp: null, phone_otp_expiry: null });
-
-  return { is_phone_verified: true };
-};
-
-// ── Resend Phone OTP ──────────────────────────────────────────────────
-const resendPhoneOtp = async ({ phone }) => {
-  const user = await User.findOne({ where: { phone } });
-  if (!user) throw { statusCode: 404, message: 'Phone number not found' };
-  if (user.is_phone_verified) throw { statusCode: 400, message: 'Phone already verified' };
-
-  const otp        = generateOtp();
-  const otp_expiry = new Date(Date.now() + env.OTP_EXPIRES_MIN * 60 * 1000);
-
-  await user.update({ phone_otp: otp, phone_otp_expiry: otp_expiry });
-
-  try {
-    await sendSmsOtp(phone, otp);
-  } catch (err) {
-    console.error('⚠️  SMS OTP failed:', err.message);
-    throw { statusCode: 502, message: 'Could not send OTP — SMS provider error. Please try again shortly.' };
-  }
-
-  return true;
-};
-
-// ── Forgot Password (email OR phone) ─────────────────────────────────
-const forgotPasswordByPhone = async ({ email, phone }) => {
-  const expiry = new Date(Date.now() + env.OTP_EXPIRES_MIN * 60 * 1000);
-
-  if (email) {
-    // ── Email flow ──
-    const user = await User.findOne({ where: { email } });
-    if (!user) throw { statusCode: 404, message: 'No account found with this email' };
-    if (user.status === 'banned') throw { statusCode: 403, message: 'Account is banned' };
-
-    const otp = generateOtp();
-    await user.update({ otp, otp_expiry: expiry });
-
-    sendOtp(user.email, user.name, otp).catch(err =>
-      console.error('⚠️  OTP email failed:', err.message)
-    );
-    return { via: 'email' };
-  }
-
-  // ── Phone (SMS) flow ──
-  const user = await User.findOne({ where: { phone } });
-  if (!user) throw { statusCode: 404, message: 'No account found with this phone number' };
+// ── Forgot Password (email) ────────────────────────────────────────────
+// Phone-based reset no longer goes through here — see verifyPhoneForReset
+// below, which checks the OTP via Twilio Verify directly.
+const forgotPasswordByEmail = async ({ email }) => {
+  const user = await User.findOne({ where: { email } });
+  if (!user) throw { statusCode: 404, message: 'No account found with this email' };
   if (user.status === 'banned') throw { statusCode: 403, message: 'Account is banned' };
 
-  const otp = generateOtp();
-  await user.update({ phone_otp: otp, phone_otp_expiry: expiry });
+  const otp    = generateOtp();
+  const expiry = new Date(Date.now() + env.OTP_EXPIRES_MIN * 60 * 1000);
+  await user.update({ otp, otp_expiry: expiry });
 
-  try {
-    await sendSmsOtp(phone, otp);
-  } catch (err) {
-    console.error('⚠️  SMS OTP failed:', err.message);
-    throw { statusCode: 502, message: 'Could not send OTP — SMS provider error. Please try again shortly.' };
-  }
-  return { via: 'phone' };
+  sendOtp(user.email, user.name, otp).catch(err =>
+    console.error('⚠️  OTP email failed:', err.message)
+  );
+  return { via: 'email' };
 };
 
-// ── Verify Forgot-Password OTP (email OR phone) → reset token ────────
-const verifyForgotPhoneOtp = async ({ email, phone, otp }) => {
+// ── Verify Forgot-Password OTP (email) → reset token ──────────────────
+const verifyForgotEmailOtp = async ({ email, otp }) => {
   const { v4: uuidv4 } = require('uuid');
 
-  if (email) {
-    // ── Email OTP verify ──
-    const user = await User.findOne({ where: { email } });
-    if (!user) throw { statusCode: 404, message: 'No account found with this email' };
+  const user = await User.findOne({ where: { email } });
+  if (!user) throw { statusCode: 404, message: 'No account found with this email' };
 
-    if (!user.otp || !user.otp_expiry)
-      throw { statusCode: 400, message: 'OTP not found. Please request a new one' };
-    if (new Date() > new Date(user.otp_expiry))
-      throw { statusCode: 400, message: 'OTP expired. Please request a new one' };
-    if (user.otp !== String(otp))
-      throw { statusCode: 400, message: 'Invalid OTP' };
-
-    const reset_token        = uuidv4();
-    const reset_token_expiry = new Date(Date.now() + 15 * 60 * 1000);
-
-    await user.update({ otp: null, otp_expiry: null, reset_token, reset_token_expiry });
-    return { reset_token };
-  }
-
-  // ── Phone OTP verify ──
-  const user = await User.findOne({ where: { phone } });
-  if (!user) throw { statusCode: 404, message: 'No account found with this phone number' };
-
-  if (!user.phone_otp || !user.phone_otp_expiry)
+  if (!user.otp || !user.otp_expiry)
     throw { statusCode: 400, message: 'OTP not found. Please request a new one' };
-  if (new Date() > new Date(user.phone_otp_expiry))
+  if (new Date() > new Date(user.otp_expiry))
     throw { statusCode: 400, message: 'OTP expired. Please request a new one' };
-  if (user.phone_otp !== String(otp))
+  if (user.otp !== String(otp))
     throw { statusCode: 400, message: 'Invalid OTP' };
 
   const reset_token        = uuidv4();
   const reset_token_expiry = new Date(Date.now() + 15 * 60 * 1000);
 
-  await user.update({
-    phone_otp: null, phone_otp_expiry: null,
-    reset_token, reset_token_expiry,
-  });
+  await user.update({ otp: null, otp_expiry: null, reset_token, reset_token_expiry });
+  return { reset_token };
+};
+
+// ── Send phone OTP (Twilio Verify) ─────────────────────────────────────
+// Shared by signup's phone-verify step and forgot-password's phone tab —
+// Twilio Verify manages the code and its expiry itself, nothing to store.
+const sendPhoneOtpService = async ({ phone }) => {
+  await sendPhoneOtp(phone);
+  return { sent: true };
+};
+
+// ── Verify phone OTP (signup) → phone-verify token ─────────────────────
+// Used by signup's "Confirm" step. The resulting token is carried forward
+// through the rest of the multi-step form and redeemed at register() time.
+const verifyPhoneOtpService = async ({ phone, otp }) => {
+  const approved = await checkPhoneOtp(phone, otp);
+  if (!approved) throw { statusCode: 400, message: 'Invalid or expired OTP' };
+  return { phoneVerifyToken: signPhoneVerifyToken(phone) };
+};
+
+// ── Verify phone OTP for password reset → reset token ──────────────────
+const verifyPhoneForReset = async ({ phone, otp }) => {
+  const { v4: uuidv4 } = require('uuid');
+
+  const approved = await checkPhoneOtp(phone, otp);
+  if (!approved) throw { statusCode: 400, message: 'Invalid or expired OTP' };
+
+  const user = await User.findOne({ where: { phone } });
+  if (!user) throw { statusCode: 404, message: 'No account found with this phone number' };
+  if (user.status === 'banned') throw { statusCode: 403, message: 'Account is banned' };
+
+  const reset_token        = uuidv4();
+  const reset_token_expiry = new Date(Date.now() + 15 * 60 * 1000);
+  await user.update({ reset_token, reset_token_expiry });
+
   return { reset_token };
 };
 
@@ -617,7 +594,7 @@ const appleAuth = async ({ identity_token, id_token, user: appleUser, role }) =>
 module.exports = {
   register, login, logout,
   verifyOtp, resendOtp,
-  verifyPhoneOtp, resendPhoneOtp,
-  forgotPasswordByPhone, verifyForgotPhoneOtp, resetPassword,
+  sendPhoneOtpService, verifyPhoneOtpService,
+  forgotPasswordByEmail, verifyForgotEmailOtp, verifyPhoneForReset, resetPassword,
   googleAuth, appleAuth,
 };

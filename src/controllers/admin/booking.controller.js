@@ -1,13 +1,16 @@
 'use strict';
 const { Op, literal }                   = require('sequelize');
-const { sequelize, Booking, User, Service, Job } = require('../../models');
+const { sequelize, Booking, BookingMilestone, BookingWorkEntry, User, Service, Job } = require('../../models');
 const wallet                            = require('../../services/wallet/wallet.service');
+const { settleWorkEntry }               = require('../../services/shared/workEntry.service');
 
 const INCLUDE = [
   { model: User,    as: 'buyer',   attributes: ['id', 'name', 'email'] },
   { model: User,    as: 'seller',  attributes: ['id', 'name', 'email'] },
   { model: Service, as: 'service', attributes: ['id', 'title'],  required: false },
   { model: Job,     as: 'job',     attributes: ['id', 'title'],  required: false },
+  { model: BookingMilestone, as: 'milestones', required: false, separate: true, order: [['position', 'ASC']] },
+  { model: BookingWorkEntry, as: 'workEntries', required: false, separate: true, order: [['work_date', 'DESC']] },
 ];
 
 // Whitelist of columns the grid may sort by, mapped to a Sequelize order path.
@@ -175,22 +178,64 @@ exports.resolveDispute = async (req, res) => {
   try {
     const booking = await Booking.findByPk(req.params.id);
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
-    if (booking.status !== 'in_dispute')
-      return res.status(400).json({ success: false, message: 'Booking is not in dispute' });
 
-    const { resolution } = req.body;
+    const { resolution, entry_id } = req.body;
     if (!['completed', 'cancelled'].includes(resolution))
       return res.status(400).json({ success: false, message: 'Resolution must be completed or cancelled' });
 
-    // Settle escrow according to the resolution.
+    // Entry-level dispute (hourly work) — Booking.status is never 'in_dispute'
+    // for these, since only one entry among many is disputed. Resolved
+    // independently of the whole-booking path below.
+    if (entry_id) {
+      const result = await sequelize.transaction(async (t) => {
+        const lockedBooking = await Booking.findByPk(booking.id, { lock: t.LOCK.UPDATE, transaction: t });
+        const entry = await BookingWorkEntry.findOne({
+          where: { id: entry_id, booking_id: booking.id }, lock: t.LOCK.UPDATE, transaction: t,
+        });
+        if (!entry) throw Object.assign(new Error('Work entry not found'), { status: 404 });
+        if (entry.status !== 'disputed')
+          throw Object.assign(new Error('Entry is not in dispute'), { status: 400 });
+
+        if (resolution === 'completed') {
+          // Favour seller — pay at the counter if one was pending, else the full logged hours.
+          return settleWorkEntry(lockedBooking, entry, { hours: Number(entry.counter_hours ?? entry.hours), t });
+        }
+        // Favour buyer — no payment.
+        await entry.update({ status: 'rejected' }, { transaction: t });
+        return entry;
+      });
+      return res.json({ success: true, message: `Entry dispute resolved as ${resolution}`, data: result });
+    }
+
+    if (booking.status !== 'in_dispute')
+      return res.status(400).json({ success: false, message: 'Booking is not in dispute' });
+
+    // Settle according to the resolution. `wasHeld` covers legacy escrow
+    // bookings that already collected the buyer's money up front; the current
+    // bid/hourly flow defers charging entirely (payment_status stays 'unpaid'
+    // through a dispute), so "favour seller" must charge the buyer here too —
+    // gating the whole payout on wasHeld (as this used to) meant it silently
+    // paid nothing for every booking created after the escrow model retired.
     await sequelize.transaction(async (t) => {
-      const wasHeld = booking.payment_status === 'held';
+      const wasHeld       = booking.payment_status === 'held';
+      const alreadySettled = ['released', 'refunded'].includes(booking.payment_status);
+
       if (resolution === 'completed') {
-        // Favour seller → release earnings (amount − fee); platform keeps the fee.
-        await booking.update({ status: 'completed', payment_status: wasHeld ? 'released' : booking.payment_status }, { transaction: t });
-        if (wasHeld) {
+        // Favour seller → charge buyer (unless already held), release earnings
+        // (amount − fee) to seller, platform keeps the fee.
+        await booking.update({
+          status: 'completed',
+          payment_status: alreadySettled ? booking.payment_status : 'released',
+        }, { transaction: t });
+
+        if (!alreadySettled) {
           const amount = Number(booking.amount);
           const fee    = Number(booking.platform_fee);
+          if (!wasHeld) {
+            await wallet.debit(booking.buyer_id, amount, {
+              type: 'booking_payment', booking_id: booking.id, note: `Payment for disputed booking #${booking.id}`,
+            }, t);
+          }
           await wallet.credit(booking.seller_id, wallet.round2(amount - fee), {
             type: 'earning', booking_id: booking.id, note: `Earning from resolved booking #${booking.id}`,
           }, t);
@@ -200,8 +245,13 @@ exports.resolveDispute = async (req, res) => {
           }
         }
       } else {
-        // Favour buyer → refund the held escrow.
-        await booking.update({ status: 'cancelled', payment_status: wasHeld ? 'refunded' : booking.payment_status }, { transaction: t });
+        // Favour buyer → refund only if money was actually collected up front
+        // (wasHeld); the deferred-payment flow never charged the buyer for a
+        // booking still in dispute, so there's nothing to refund in that case.
+        await booking.update({
+          status: 'cancelled',
+          payment_status: alreadySettled ? booking.payment_status : (wasHeld ? 'refunded' : booking.payment_status),
+        }, { transaction: t });
         if (wasHeld) {
           await wallet.credit(booking.buyer_id, Number(booking.amount), {
             type: 'booking_refund', booking_id: booking.id, note: `Refund for disputed booking #${booking.id}`,
@@ -211,6 +261,7 @@ exports.resolveDispute = async (req, res) => {
     });
     return res.json({ success: true, message: `Dispute resolved as ${resolution}`, data: booking });
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ success: false, message: err.message });
     console.error('resolveDispute:', err);
     return res.status(500).json({ success: false, message: 'Server error' });
   }

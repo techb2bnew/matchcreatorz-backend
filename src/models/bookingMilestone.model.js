@@ -27,10 +27,18 @@ const BookingMilestone = sequelize.define('BookingMilestone', {
   duration_days: { type: DataTypes.INTEGER, allowNull: true },
 
   status: {
-    type:         DataTypes.ENUM('pending', 'submitted', 'approved', 'rejected'),
+    type:         DataTypes.ENUM('pending', 'submitted', 'countered', 'approved', 'rejected'),
     allowNull:    false,
     defaultValue: 'pending',
   },
+
+  // Bidirectional negotiation on the submitted amount — mirrors
+  // BookingWorkEntry's counter_hours/counter_by/counter_note pattern.
+  // Whichever party did NOT set the last counter can approve at
+  // `counter_amount` or overwrite it with a counter of their own.
+  counter_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: true },
+  counter_by:     { type: DataTypes.ENUM('buyer', 'seller'), allowNull: true },
+  counter_note:   { type: DataTypes.TEXT, allowNull: true },
 
   // Charged from the buyer's wallet only once this stage is submitted
   // (deferred payment — see seller/booking.service.js submitMilestone).

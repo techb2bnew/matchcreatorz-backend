@@ -1,11 +1,11 @@
 'use strict';
 const { Op }                          = require('sequelize');
-const { sequelize, Booking, BookingMilestone, User, Service, Job } = require('../../models');
+const { sequelize, Booking, BookingMilestone, BookingWorkEntry, User, Service, Job } = require('../../models');
 const notify                          = require('../../helpers/notification.helper');
 const wallet                          = require('../wallet/wallet.service');
-const env                             = require('../../config/env');
-
-const FEE_PERCENT = (Number(env.PLATFORM_FEE_PERCENT) || 10) / 100;
+const { computeFee }                  = require('../../config/fee');
+const { settleWorkEntry }             = require('../shared/workEntry.service');
+const { settleMilestone }             = require('../shared/milestone.service');
 
 const INCLUDE = [
   { model: User,    as: 'buyer',   attributes: ['id', 'name'] },
@@ -13,7 +13,20 @@ const INCLUDE = [
   { model: Service, as: 'service', attributes: ['id', 'title', 'images'], required: false },
   { model: Job,     as: 'job',     attributes: ['id', 'title'],           required: false },
   { model: BookingMilestone, as: 'milestones', required: false, separate: true, order: [['position', 'ASC']] },
+  { model: BookingWorkEntry, as: 'workEntries', required: false, separate: true, order: [['work_date', 'DESC']] },
 ];
+
+// Monday–Sunday window containing `date` (plain Date math — same style
+// already used in wallet.service.js:listTransactions / admin/booking.controller.js).
+const weekWindow = (date) => {
+  const d = new Date(date);
+  const day = d.getDay(); // 0=Sun..6=Sat
+  const diffToMonday = (day + 6) % 7;
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - diffToMonday);
+  const end   = new Date(start);
+  end.setDate(end.getDate() + 7);
+  return { start, end };
+};
 
 const STATUS_MAP = {
   active:    ['pending', 'ongoing', 'amidst_completion', 'in_dispute'],
@@ -56,9 +69,11 @@ exports.acceptOrder = async (sellerId, id) => {
   return booking;
 };
 
-exports.submitWork = async (sellerId, id, { attachments, notes, delivery_days, hours_worked } = {}) => {
+exports.submitWork = async (sellerId, id, { attachments, notes, delivery_days } = {}) => {
   const booking = await Booking.findOne({ where: { id, seller_id: sellerId } });
   if (!booking) throw Object.assign(new Error('Booking not found'), { status: 404 });
+  if (booking.job_type === 'hourly')
+    throw Object.assign(new Error('Hourly bookings submit per-day work entries — use POST /bookings/:id/work-entries instead'), { status: 400 });
   if (!['ongoing', 'in_dispute'].includes(booking.status))
     throw Object.assign(new Error('Booking must be ongoing or in dispute to submit work'), { status: 400 });
 
@@ -73,24 +88,6 @@ exports.submitWork = async (sellerId, id, { attachments, notes, delivery_days, h
     delivery_days: delivery_days ? Math.max(1, Math.round(Number(delivery_days))) : booking.delivery_days,
   };
 
-  if (booking.job_type === 'hourly') {
-    const hours = Number(hours_worked);
-    if (!hours || hours <= 0)
-      throw Object.assign(new Error('hours_worked is required for hourly bookings'), { status: 400 });
-
-    // `amount` holds the agreed $/hr rate until first submission, after which it
-    // holds the computed total — recover the rate algebraically on resubmission
-    // (e.g. after a dispute) instead of needing a separate rate column.
-    const rate = booking.hours_worked != null
-      ? Number(booking.amount) / Number(booking.hours_worked)
-      : Number(booking.amount);
-
-    const total = wallet.round2(hours * rate);
-    patch.amount        = total;
-    patch.platform_fee  = wallet.round2(total * FEE_PERCENT);
-    patch.hours_worked  = hours;
-  }
-
   // No wallet charge here — the buyer is only charged (and the escrow released
   // to the seller, in one step) when they click Accept.
   await booking.update(patch);
@@ -98,6 +95,120 @@ exports.submitWork = async (sellerId, id, { attachments, notes, delivery_days, h
   const buyer = await User.findByPk(booking.buyer_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
   if (buyer) notify.workSubmitted(buyer, booking);
   return booking;
+};
+
+// ── Hourly work entries ──────────────────────────────────────────────────
+// A seller logs one dated entry at a time (date + description + hours)
+// against an hourly booking. Payment is never touched here — only on the
+// buyer's approve, the seller's accept-counter, or an admin's dispute
+// resolution (all three route through services/shared/workEntry.service.js).
+exports.submitWorkEntry = async (sellerId, id, { work_date, description, hours, attachments } = {}) => {
+  const h = Number(hours);
+  if (!work_date) throw Object.assign(new Error('work_date is required'), { status: 400 });
+  if (!h || h <= 0) throw Object.assign(new Error('hours must be a positive number'), { status: 400 });
+
+  return sequelize.transaction(async (t) => {
+    // Row-lock the booking for the duration of the weekly-limit check + entry
+    // insert, so two concurrent submissions for the same booking can't both
+    // read a stale weekly sum and both pass the limit check.
+    const booking = await Booking.findOne({
+      where: { id, seller_id: sellerId }, lock: t.LOCK.UPDATE, transaction: t,
+    });
+    if (!booking) throw Object.assign(new Error('Booking not found'), { status: 404 });
+    if (booking.job_type !== 'hourly')
+      throw Object.assign(new Error('This booking is not hourly'), { status: 400 });
+    if (!['ongoing', 'in_dispute'].includes(booking.status))
+      throw Object.assign(new Error('Booking must be ongoing or in dispute to log work'), { status: 400 });
+    if (booking.hourly_rate == null)
+      throw Object.assign(new Error('This contract has no hourly rate set — contact support'), { status: 400 });
+
+    if (booking.weekly_hour_limit != null) {
+      const { start, end } = weekWindow(work_date);
+      const sum = await BookingWorkEntry.sum('hours', {
+        where: {
+          booking_id: booking.id,
+          work_date: { [Op.gte]: start, [Op.lt]: end },
+          status: { [Op.in]: ['pending', 'countered', 'approved', 'disputed'] },
+        },
+        transaction: t,
+      }) || 0;
+      if (Number(sum) + h > Number(booking.weekly_hour_limit))
+        throw Object.assign(new Error(
+          `This would exceed the weekly limit of ${booking.weekly_hour_limit}h (already logged ${sum}h this week)`
+        ), { status: 400 });
+    }
+
+    const rate   = Number(booking.hourly_rate);
+    const amount = wallet.round2(h * rate);
+
+    const entry = await BookingWorkEntry.create({
+      booking_id:  booking.id,
+      work_date,
+      description: description || null,
+      hours:       h,
+      rate,
+      amount,
+      platform_fee: computeFee(amount),
+      status:      'pending',
+      attachments: Array.isArray(attachments) ? attachments : [],
+      submitted_at: new Date(),
+    }, { transaction: t });
+
+    return entry;
+  }).then(async (entry) => {
+    const booking = await Booking.findByPk(entry.booking_id);
+    const buyer = await User.findByPk(booking.buyer_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
+    if (buyer) notify.workEntrySubmitted(buyer, booking, entry);
+    return entry;
+  });
+};
+
+// Seller accepts the buyer's counter (they logged 5h, buyer offered to pay
+// for 3h, seller agrees) — settles at the countered hours.
+exports.acceptWorkEntryCounter = async (sellerId, id, entryId) => {
+  return sequelize.transaction(async (t) => {
+    const booking = await Booking.findOne({
+      where: { id, seller_id: sellerId }, lock: t.LOCK.UPDATE, transaction: t,
+    });
+    if (!booking) throw Object.assign(new Error('Booking not found'), { status: 404 });
+
+    const entry = await BookingWorkEntry.findOne({
+      where: { id: entryId, booking_id: booking.id }, lock: t.LOCK.UPDATE, transaction: t,
+    });
+    if (!entry) throw Object.assign(new Error('Work entry not found'), { status: 404 });
+    if (entry.status !== 'countered' || entry.counter_by !== 'buyer')
+      throw Object.assign(new Error('There is no buyer counter to accept on this entry'), { status: 400 });
+
+    await settleWorkEntry(booking, entry, { hours: Number(entry.counter_hours), t });
+    return entry;
+  });
+};
+
+// Seller re-counters the buyer's counter (buyer offered 3h, seller proposes
+// 5h instead) — same negotiation pattern as the Bid counter-offer flow
+// (job.controller.js:counterBid/counterBidBySeller): plain field overwrite,
+// ball moves back to the buyer, who can then approve at the new counter_hours
+// or counter again themselves.
+exports.counterWorkEntryBySeller = async (sellerId, id, entryId, { counter_hours, counter_note } = {}) => {
+  const hours = Number(counter_hours);
+  if (!hours || hours <= 0)
+    throw Object.assign(new Error('A valid counter hours value is required'), { status: 400 });
+
+  const booking = await Booking.findOne({ where: { id, seller_id: sellerId } });
+  if (!booking) throw Object.assign(new Error('Booking not found'), { status: 404 });
+
+  const entry = await BookingWorkEntry.findOne({ where: { id: entryId, booking_id: booking.id } });
+  if (!entry) throw Object.assign(new Error('Work entry not found'), { status: 404 });
+  if (entry.status !== 'countered' || entry.counter_by !== 'buyer')
+    throw Object.assign(new Error('There is no buyer counter to respond to on this entry'), { status: 400 });
+  if (hours > Number(entry.hours))
+    throw Object.assign(new Error('Counter hours cannot exceed the hours logged'), { status: 400 });
+
+  await entry.update({ counter_hours: hours, counter_by: 'seller', counter_note: counter_note || null });
+
+  const buyer = await User.findByPk(booking.buyer_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
+  if (buyer) notify.workEntryCountered(buyer, booking, entry, 'seller');
+  return entry;
 };
 
 // ── Milestones ────────────────────────────────────────────────────────────
@@ -166,6 +277,57 @@ exports.submitMilestone = async (sellerId, id, milestoneId, { attachments, notes
 
   const buyer = await User.findByPk(booking.buyer_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
   if (buyer) notify.workSubmitted(buyer, booking);
+  return milestone;
+};
+
+// Seller accepts the buyer's counter (submitted at $150, buyer offered $100,
+// seller agrees) — settles at the countered amount.
+exports.acceptMilestoneCounterBySeller = async (sellerId, id, milestoneId) => {
+  try {
+    return await sequelize.transaction(async (t) => {
+      const booking = await Booking.findOne({
+        where: { id, seller_id: sellerId }, lock: t.LOCK.UPDATE, transaction: t,
+      });
+      if (!booking) throw Object.assign(new Error('Booking not found'), { status: 404 });
+
+      const milestone = await BookingMilestone.findOne({
+        where: { id: milestoneId, booking_id: booking.id }, lock: t.LOCK.UPDATE, transaction: t,
+      });
+      if (!milestone) throw Object.assign(new Error('Milestone not found'), { status: 404 });
+      if (milestone.status !== 'countered' || milestone.counter_by !== 'buyer')
+        throw Object.assign(new Error('There is no buyer counter to accept on this milestone'), { status: 400 });
+
+      return settleMilestone(booking, milestone, { amount: Number(milestone.counter_amount), t });
+    });
+  } catch (err) {
+    if (err.name === 'SequelizeUniqueConstraintError')
+      throw Object.assign(new Error('This milestone was already processed'), { status: 409 });
+    throw err;
+  }
+};
+
+// Seller re-counters the buyer's counter (buyer offered $100, seller proposes
+// $125 instead) — same negotiation pattern as counterWorkEntryBySeller: plain
+// field overwrite, ball moves back to the buyer.
+exports.counterMilestoneBySeller = async (sellerId, id, milestoneId, { counter_amount, counter_note } = {}) => {
+  const amount = Number(counter_amount);
+  if (!amount || amount <= 0)
+    throw Object.assign(new Error('A valid counter amount is required'), { status: 400 });
+
+  const booking = await Booking.findOne({ where: { id, seller_id: sellerId } });
+  if (!booking) throw Object.assign(new Error('Booking not found'), { status: 404 });
+
+  const milestone = await BookingMilestone.findOne({ where: { id: milestoneId, booking_id: booking.id } });
+  if (!milestone) throw Object.assign(new Error('Milestone not found'), { status: 404 });
+  if (milestone.status !== 'countered' || milestone.counter_by !== 'buyer')
+    throw Object.assign(new Error('There is no buyer counter to respond to on this milestone'), { status: 400 });
+  if (amount > Number(milestone.amount))
+    throw Object.assign(new Error('Counter amount cannot exceed the submitted amount'), { status: 400 });
+
+  await milestone.update({ counter_amount: amount, counter_by: 'seller', counter_note: counter_note || null });
+
+  const buyer = await User.findByPk(booking.buyer_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
+  if (buyer) notify.milestoneCountered(buyer, booking, milestone, 'seller');
   return milestone;
 };
 

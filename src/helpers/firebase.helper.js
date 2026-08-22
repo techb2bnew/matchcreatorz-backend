@@ -2,16 +2,11 @@
 const env = require('../config/env');
 
 // ── Lazy-init Firebase Admin ──────────────────────────────────────────────────
-let _messaging = null;
-
-function getMessaging() {
-  if (_messaging) return _messaging;
-
+function getAdminApp() {
   if (!env.FIREBASE_PROJECT_ID || !env.FIREBASE_CLIENT_EMAIL || !env.FIREBASE_PRIVATE_KEY) {
-    console.warn('⚠️  Firebase env vars not set — FCM notifications disabled');
+    console.warn('⚠️  Firebase env vars not set — Firebase Admin features disabled');
     return null;
   }
-
   try {
     const admin = require('firebase-admin');
     if (!admin.apps.length) {
@@ -24,12 +19,20 @@ function getMessaging() {
         }),
       });
     }
-    _messaging = admin.messaging();
+    return admin;
   } catch (err) {
     console.error('❌  Firebase init failed:', err.message);
     return null;
   }
+}
 
+let _messaging = null;
+
+function getMessaging() {
+  if (_messaging) return _messaging;
+  const admin = getAdminApp();
+  if (!admin) return null;
+  _messaging = admin.messaging();
   return _messaging;
 }
 

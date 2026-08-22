@@ -3,8 +3,8 @@ const router = require('express').Router();
 const {
   register, login, logout,
   verifyOtp, resendOtp,
-  verifyPhoneOtp, resendPhoneOtp,
-  forgotPassword, verifyForgotOtp, resetPassword,
+  sendPhoneOtp, verifyPhoneOtp,
+  forgotPassword, verifyForgotOtp, verifyForgotPhone, resetPassword,
   google, apple,
 } = require('../../controllers/auth/auth.controller');
 const { authenticate }            = require('../../middlewares/auth.middleware');
@@ -55,12 +55,15 @@ router.post('/apple',      apple);
 router.post('/logout',     authenticate,                          logout);
 router.post('/verify-otp',       validateBody(authSchemas.verifyOtp),      verifyOtp);
 router.post('/resend-otp',       validateBody(authSchemas.forgotPassword),  resendOtp);
-router.post('/verify-phone-otp', validateBody(authSchemas.verifyPhoneOtp),  verifyPhoneOtp);
-router.post('/resend-phone-otp', validateBody(authSchemas.resendPhoneOtp),  resendPhoneOtp);
 
-// ── Forgot password (phone OTP flow) ────────────────────────────────
-router.post('/forgot-password',    validateBody(authSchemas.forgotPasswordPhone),  forgotPassword);
-router.post('/verify-forgot-otp',  validateBody(authSchemas.verifyForgotPhoneOtp), verifyForgotOtp);
-router.post('/reset-password',     validateBody(authSchemas.resetPassword),        resetPassword);
+// ── Phone OTP (Twilio Verify) — shared send, used by signup + forgot-password ──
+router.post('/send-phone-otp',    validateBody(authSchemas.sendPhoneOtp),    sendPhoneOtp);
+router.post('/verify-phone-otp',  validateBody(authSchemas.verifyPhoneOtp),  verifyPhoneOtp);
+
+// ── Forgot password — email (OTP via SMTP) or phone (Twilio Verify) ──
+router.post('/forgot-password',       validateBody(authSchemas.forgotPassword),     forgotPassword);
+router.post('/verify-forgot-otp',     validateBody(authSchemas.verifyForgotOtp),    verifyForgotOtp);
+router.post('/verify-forgot-phone',   validateBody(authSchemas.verifyForgotPhone),  verifyForgotPhone);
+router.post('/reset-password',        validateBody(authSchemas.resetPassword),      resetPassword);
 
 module.exports = router;

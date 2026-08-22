@@ -48,17 +48,35 @@ const Booking = sequelize.define('Booking', {
   },
 
   // Denormalized copy of the originating job's type (services are always 'fixed').
-  // Drives hourly-billing behavior: for 'hourly' bookings, `amount` holds the
-  // agreed $/hr rate until the seller submits work with `hours_worked`, at
-  // which point `amount` is overwritten with the computed total (hours * rate).
   job_type: {
     type:         DataTypes.STRING(20),
     allowNull:    false,
     defaultValue: 'fixed',
   },
 
-  // Hours the seller logged at submission time (hourly bookings only).
-  // Null until submitted; once set, `amount` is the computed total, not the rate.
+  // Agreed $/hr rate for hourly bookings — set once at booking creation
+  // (buyer/job.controller.js:acceptBid, seller/job.controller.js:acceptCounterBySeller)
+  // and never trusted from a request afterwards. Each BookingWorkEntry
+  // snapshots this at submit time.
+  hourly_rate: {
+    type:      DataTypes.DECIMAL(10, 2),
+    allowNull: true,
+  },
+
+  // Optional cap on hours a seller may log per calendar week on this contract.
+  // Null = no limit. Enforced server-side in submitWorkEntry — see that
+  // function for the concurrency-safe (row-locked) check.
+  weekly_hour_limit: {
+    type:      DataTypes.DECIMAL(6, 2),
+    allowNull: true,
+  },
+
+  // For hourly bookings, `amount`/`hours_worked` are maintained AGGREGATES of
+  // that booking's *approved* BookingWorkEntry rows (recomputed transactionally
+  // by services/shared/workEntry.service.js:settleWorkEntry on every approval)
+  // — not a single submitted value. This keeps every existing summary view
+  // (formatBookingAmount, admin bookings/wallet pages) working unmodified,
+  // now showing "paid so far" rather than "pending review total."
   hours_worked: {
     type:      DataTypes.DECIMAL(10, 2),
     allowNull: true,

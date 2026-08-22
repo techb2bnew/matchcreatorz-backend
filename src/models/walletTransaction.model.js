@@ -1,6 +1,6 @@
 'use strict';
-const { DataTypes } = require('sequelize');
-const sequelize     = require('../config/db');
+const { DataTypes, Op } = require('sequelize');
+const sequelize          = require('../config/db');
 
 // Immutable ledger of every wallet movement. `amount` is positive for credits
 // and negative for debits; `balance_after` snapshots the running balance.
@@ -47,6 +47,16 @@ const WalletTransaction = sequelize.define('WalletTransaction', {
   withdrawal_id:   { type: DataTypes.INTEGER,     allowNull: true },
   stripe_ref:      { type: DataTypes.STRING,      allowNull: true }, // session/transfer/payout id
 
+  // Set only for the entries this row settles a BookingWorkEntry payment for.
+  // Paired with the partial unique index below, this is the DB-level guard
+  // against double-crediting the same work entry (double-click, retry, race)
+  // — see services/shared/workEntry.service.js:settleWorkEntry.
+  work_entry_id:   { type: DataTypes.INTEGER,     allowNull: true },
+
+  // Same idempotency guard as work_entry_id, for BookingMilestone settlements
+  // — see services/shared/milestone.service.js:settleMilestone.
+  milestone_id:    { type: DataTypes.INTEGER,     allowNull: true },
+
 }, {
   tableName:  'wallet_transactions',
   timestamps: true,
@@ -56,6 +66,20 @@ const WalletTransaction = sequelize.define('WalletTransaction', {
     { fields: ['user_id', 'created_at'] },
     { fields: ['type'] },
     { fields: ['booking_id'] },
+    // Partial (WHERE work_entry_id IS NOT NULL) so it doesn't apply to the
+    // large volume of existing rows with a null work_entry_id — one entry
+    // approval creates at most one row of each `type` (booking_payment,
+    // earning, platform_fee), so (work_entry_id, type) is the idempotency key.
+    {
+      unique: true,
+      fields: ['work_entry_id', 'type'],
+      where:  { work_entry_id: { [Op.ne]: null } },
+    },
+    {
+      unique: true,
+      fields: ['milestone_id', 'type'],
+      where:  { milestone_id: { [Op.ne]: null } },
+    },
   ],
 });
 

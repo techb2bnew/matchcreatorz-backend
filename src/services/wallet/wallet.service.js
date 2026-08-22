@@ -48,6 +48,8 @@ const applyDelta = async (userId, delta, meta = {}, existingTx = null) => {
       booking_id:    meta.booking_id || null,
       withdrawal_id: meta.withdrawal_id || null,
       stripe_ref:    meta.stripe_ref || null,
+      work_entry_id: meta.work_entry_id || null,
+      milestone_id:  meta.milestone_id || null,
     }, { transaction: t });
 
     return { wallet, txn };

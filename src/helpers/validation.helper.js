@@ -30,8 +30,11 @@ const authSchemas = {
     role:     Joi.string().valid('SELLER', 'BUYER').required(),
 
     // ── Optional for all roles ────────────────────
-    phone:         fields.phone.optional(),
-    profile_image: Joi.string().uri().optional(),
+    phone:            fields.phone.optional(),
+    // required alongside phone — see auth.service.js register() for the
+    // server-side check this gates (token from /verify-phone-otp)
+    phoneVerifyToken: Joi.string().optional(),
+    profile_image:    Joi.string().uri().optional(),
 
     // ── Seller: required when role = SELLER ───────
     skills: Joi.when('role', {
@@ -87,30 +90,25 @@ const authSchemas = {
     newPassword:     fields.password.required(),
   }),
 
+  // ── Forgot password by email — OTP verify ───────
+  verifyForgotOtp: Joi.object({
+    email: fields.email.required(),
+    otp:   fields.otp.required(),
+  }),
+
+  // ── Phone OTP (Twilio Verify) — shared send, plus per-flow verify ────
+  sendPhoneOtp: Joi.object({
+    phone: fields.phone.required(),
+  }),
+
   verifyPhoneOtp: Joi.object({
     phone: fields.phone.required(),
     otp:   fields.otp.required(),
   }),
 
-  resendPhoneOtp: Joi.object({
+  verifyForgotPhone: Joi.object({
     phone: fields.phone.required(),
-  }),
-
-  // ── Forgot password (email OR phone) ────────────
-  forgotPasswordPhone: Joi.object({
-    email: fields.email.optional(),
-    phone: fields.phone.optional(),
-  }).or('email', 'phone'),          // at least one required
-
-  verifyForgotPhoneOtp: Joi.object({
-    email: fields.email.optional(),
-    phone: fields.phone.optional(),
     otp:   fields.otp.required(),
-  }).or('email', 'phone'),
-
-  resetPassword: Joi.object({
-    token:    Joi.string().required(),
-    password: fields.password.required(),
   }),
 
   refreshToken: Joi.object({

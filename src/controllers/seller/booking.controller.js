@@ -158,6 +158,110 @@ exports.submitWork = async (req, res, next) => {
 
 /**
  * @swagger
+ * /api/v1/seller/bookings/{id}/work-entries:
+ *   post:
+ *     summary: Log a day of hourly work (hourly bookings only)
+ *     description: |
+ *       Each call adds one dated entry — it does NOT overwrite previous entries.
+ *       Rate is always taken from the booking's `hourly_rate`, never from the request.
+ *       Rejected with 400 if the entry would exceed the booking's `weekly_hour_limit`.
+ *     tags: [Seller - Bookings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [work_date, hours]
+ *             properties:
+ *               work_date:   { type: string, format: date, example: "2026-08-21" }
+ *               description: { type: string }
+ *               hours:       { type: number, example: 5 }
+ *     responses:
+ *       201: { description: Entry logged, awaiting buyer review }
+ *       400: { description: Not hourly / weekly limit exceeded / invalid hours }
+ */
+exports.submitWorkEntry = async (req, res, next) => {
+  try {
+    const data = await svc.submitWorkEntry(req.user.id, req.params.id, req.body);
+    return response.created(res, 'Work entry logged for buyer review', data);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
+ * /api/v1/seller/bookings/{id}/work-entries/{entryId}/accept-counter:
+ *   patch:
+ *     summary: Accept the buyer's counter on a work entry (pays at the countered hours)
+ *     tags: [Seller - Bookings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *       - in: path
+ *         name: entryId
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: Counter accepted and paid }
+ *       400: { description: No buyer counter to accept on this entry }
+ *       404: { description: Not found }
+ */
+exports.acceptWorkEntryCounter = async (req, res, next) => {
+  try {
+    const data = await svc.acceptWorkEntryCounter(req.user.id, req.params.id, req.params.entryId);
+    return response.success(res, 'Counter accepted', data);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
+ * /api/v1/seller/bookings/{id}/work-entries/{entryId}/counter:
+ *   patch:
+ *     summary: Re-counter the buyer's counter on a work entry (propose a different hours value back)
+ *     tags: [Seller - Bookings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *       - in: path
+ *         name: entryId
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [counter_hours]
+ *             properties:
+ *               counter_hours: { type: number, example: 4 }
+ *               counter_note:  { type: string }
+ *     responses:
+ *       200: { description: Counter sent back to buyer }
+ *       400: { description: No buyer counter to respond to / counter exceeds logged hours }
+ *       404: { description: Not found }
+ */
+exports.counterWorkEntryBySeller = async (req, res, next) => {
+  try {
+    const data = await svc.counterWorkEntryBySeller(req.user.id, req.params.id, req.params.entryId, req.body);
+    return response.success(res, 'Counter sent to buyer', data);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
  * /api/v1/seller/bookings/{id}/milestones:
  *   post:
  *     summary: Split a booking's total amount into milestones
@@ -198,6 +302,73 @@ exports.createMilestones = async (req, res, next) => {
   try {
     const data = await svc.createMilestones(req.user.id, req.params.id, req.body.milestones);
     return response.created(res, 'Milestones created', data);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
+ * /api/v1/seller/bookings/{id}/milestones/{milestoneId}/accept-counter:
+ *   patch:
+ *     summary: Accept the buyer's counter on a milestone (pays at the countered amount)
+ *     tags: [Seller - Bookings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *       - in: path
+ *         name: milestoneId
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: Counter accepted and paid }
+ *       400: { description: No buyer counter to accept on this milestone }
+ *       404: { description: Not found }
+ *       409: { description: Milestone was already processed (duplicate/retry) }
+ */
+exports.acceptMilestoneCounterBySeller = async (req, res, next) => {
+  try {
+    const data = await svc.acceptMilestoneCounterBySeller(req.user.id, req.params.id, req.params.milestoneId);
+    return response.success(res, 'Counter accepted', data);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
+ * /api/v1/seller/bookings/{id}/milestones/{milestoneId}/counter:
+ *   patch:
+ *     summary: Re-counter the buyer's counter on a milestone (propose a different amount back)
+ *     tags: [Seller - Bookings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *       - in: path
+ *         name: milestoneId
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [counter_amount]
+ *             properties:
+ *               counter_amount: { type: number, example: 125 }
+ *               counter_note:   { type: string }
+ *     responses:
+ *       200: { description: Counter sent back to buyer }
+ *       400: { description: No buyer counter to respond to / counter exceeds submitted amount }
+ *       404: { description: Not found }
+ */
+exports.counterMilestoneBySeller = async (req, res, next) => {
+  try {
+    const data = await svc.counterMilestoneBySeller(req.user.id, req.params.id, req.params.milestoneId, req.body);
+    return response.success(res, 'Counter sent to buyer', data);
   } catch (err) { next(err); }
 };
 

@@ -3,8 +3,7 @@ const { sequelize, Job, User, Bid, Booking } = require('../../models');
 const { Op, literal }             = require('sequelize');
 const notify                      = require('../../helpers/notification.helper');
 const { stripHtml }               = require('../../helpers/text.helper');
-
-const FEE_PERCENT = 0.10;
+const { computeFee }              = require('../../config/fee');
 
 const BUYER_ATTRS = ['id', 'name', 'email'];
 
@@ -531,8 +530,8 @@ exports.acceptBid = async (req, res) => {
       ? bid.counter_delivery_days : bid.delivery_days;
     const isHourly = job.job_type === 'hourly';
     // For hourly jobs, effAmount is the agreed $/hr rate — the total (and its fee)
-    // isn't known until the seller logs hours at submission time.
-    const fee = isHourly ? 0 : Math.round(effAmount * FEE_PERCENT * 100) / 100;
+    // isn't known until the seller logs hours per work entry.
+    const fee = isHourly ? 0 : computeFee(effAmount);
 
     // No wallet charge here — payment is deferred until the seller actually
     // submits work. The bid/job/booking updates still happen atomically.
@@ -559,6 +558,7 @@ exports.acceptBid = async (req, res) => {
         amount:        effAmount,
         platform_fee:  fee,
         job_type:      job.job_type || 'fixed',
+        hourly_rate:   isHourly ? effAmount : null,
         delivery_days: effDelivery,
         // Straight to 'ongoing' — the seller already committed to these terms by
         // bidding, so asking them to "Accept" again would be a redundant step.

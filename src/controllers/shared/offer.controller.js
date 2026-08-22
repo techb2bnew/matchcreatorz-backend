@@ -2,9 +2,7 @@
 const { sequelize, Offer, Booking, Service, User } = require('../../models');
 const response = require('../../helpers/response.helper');
 const notify   = require('../../helpers/notification.helper');
-const env      = require('../../config/env');
-
-const FEE_PERCENT = (Number(env.PLATFORM_FEE_PERCENT) || 10) / 100;
+const { computeFee } = require('../../config/fee');
 
 const INCLUDE = [
   { model: User,    as: 'seller',  attributes: ['id', 'name', 'email'] },
@@ -220,7 +218,7 @@ exports.acceptOffer = async (req, res, next) => {
     }
 
     const amount = Number(offer.amount);
-    const fee    = Math.round(amount * FEE_PERCENT * 100) / 100;
+    const fee    = computeFee(amount);
 
     // No wallet charge here — payment is deferred until the seller actually
     // submits work. Booking + offer updates still happen atomically.

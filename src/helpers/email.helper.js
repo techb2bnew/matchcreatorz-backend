@@ -24,7 +24,9 @@ if (env.NODE_ENV === 'production') {
 
 // ── Logo URL ─────────────────────────────────────────────────────────
 
-const logoUrl = () => `https://matchcreatorz.s3.us-east-1.amazonaws.com/portfolios/logo.svg`;
+// PNG, not SVG — Gmail (and several other mail clients) does not reliably
+// render SVG images embedded in emails, showing a broken-image icon instead.
+const logoUrl = () => `https://matchcreatorz.s3.us-east-1.amazonaws.com/banners/logo.png`;
 
 // ── Base template ───────────────────────────────────────────────────
 

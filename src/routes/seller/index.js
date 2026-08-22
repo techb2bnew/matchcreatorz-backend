@@ -10,7 +10,7 @@ const { changePassword, deleteAccount, getPreferences, updatePreferences } = req
 const { registerFcmToken, clearFcmToken } = require('../../controllers/shared/fcm.controller');
 const { listNotifications, getUnreadCount, markOneRead, markAllRead, deleteOne: deleteNotification } = require('../../controllers/shared/notification.controller');
 const { browseJobs, getJobDetail, placeBid, updateBid, withdrawBid, myBids, counterBidBySeller, acceptCounterBySeller } = require('../../controllers/seller/job.controller');
-const { listBookings: listSellerBookings, getBooking: getSellerBooking, acceptOrder, submitWork, cancelBooking: cancelSellerBooking, createMilestones, submitMilestone, uploadAttachment: uploadBookingAttachment } = require('../../controllers/seller/booking.controller');
+const { listBookings: listSellerBookings, getBooking: getSellerBooking, acceptOrder, submitWork, cancelBooking: cancelSellerBooking, createMilestones, submitMilestone, uploadAttachment: uploadBookingAttachment, submitWorkEntry, acceptWorkEntryCounter, counterWorkEntryBySeller, acceptMilestoneCounterBySeller, counterMilestoneBySeller } = require('../../controllers/seller/booking.controller');
 const { listReviews: listSellerReviews } = require('../../controllers/seller/review.controller');
 const { getStats: getSellerStats }       = require('../../controllers/seller/stats.controller');
 const { getBalance: getConnectsBalance, getHistory: getConnectsHistory, getPlans: getConnectsPlans, purchasePlan: purchaseConnects, confirmPurchase: confirmConnectsPurchase } = require('../../controllers/seller/connect.controller');
@@ -91,6 +91,11 @@ router.patch ('/bookings/:id/submit',                   submitWork);
 router.patch ('/bookings/:id/cancel',                   cancelSellerBooking);
 router.post  ('/bookings/:id/milestones',                createMilestones);
 router.patch ('/bookings/:id/milestones/:milestoneId/submit', submitMilestone);
+router.patch ('/bookings/:id/milestones/:milestoneId/accept-counter', acceptMilestoneCounterBySeller);
+router.patch ('/bookings/:id/milestones/:milestoneId/counter',        counterMilestoneBySeller);
+router.post  ('/bookings/:id/work-entries',                    submitWorkEntry);
+router.patch ('/bookings/:id/work-entries/:entryId/accept-counter', acceptWorkEntryCounter);
+router.patch ('/bookings/:id/work-entries/:entryId/counter',        counterWorkEntryBySeller);
 
 // ── Browse Jobs & Bidding ──────────────────────────────────────────────
 router.post  ('/bids/upload',    bookingUpload.single('file'), uploadBidAttachment);

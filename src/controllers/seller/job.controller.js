@@ -4,8 +4,7 @@ const { Op, literal }    = require('sequelize');
 const notify             = require('../../helpers/notification.helper');
 const { applyConnects, getBidCost } = require('../../helpers/connects.helper');
 const { stripHtml }               = require('../../helpers/text.helper');
-
-const FEE_PERCENT = 0.10;
+const { computeFee }              = require('../../config/fee');
 const MAX_BID_ATTACHMENTS = 5;
 
 // ── Browse open jobs ──────────────────────────────────────────────────
@@ -430,7 +429,10 @@ exports.acceptCounterBySeller = async (req, res) => {
 
     const effAmount   = Number(bid.counter_amount);
     const effDelivery = bid.counter_delivery_days != null ? bid.counter_delivery_days : bid.delivery_days;
-    const fee = Math.round(effAmount * FEE_PERCENT * 100) / 100;
+    const isHourly = job.job_type === 'hourly';
+    // For hourly jobs, effAmount is the agreed $/hr rate — the total (and its fee)
+    // isn't known until the seller logs hours per work entry.
+    const fee = isHourly ? 0 : computeFee(effAmount);
 
     // No wallet charge here — payment is deferred until the seller actually
     // submits work. The bid/job/booking updates still happen atomically.
@@ -447,6 +449,8 @@ exports.acceptCounterBySeller = async (req, res) => {
         title:         job.title,
         amount:        effAmount,
         platform_fee:  fee,
+        job_type:      job.job_type || 'fixed',
+        hourly_rate:   isHourly ? effAmount : null,
         delivery_days: effDelivery,
         status:        'pending',
       }, { transaction: t });

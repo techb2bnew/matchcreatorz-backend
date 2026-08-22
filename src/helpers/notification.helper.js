@@ -235,6 +235,37 @@ const disputeRaised = (seller, booking) => notifyUser(seller, {
   email: () => email.sendDisputeRaised(seller.email, seller.name, booking.title),
 });
 
+// Hourly work entries — one dated submission at a time within an hourly booking.
+const workEntrySubmitted = (buyer, booking, entry) => notifyUser(buyer, {
+  type: 'work_submitted', title: 'Hours Logged for Review',
+  body: `The seller logged ${entry.hours}h on ${entry.work_date} for "${booking.title}". Please review.`,
+  data: { type: 'work_submitted', booking_id: String(booking.id), work_entry_id: String(entry.id) },
+});
+
+// `recipient` is whoever needs to respond next — the counter came from the
+// *other* party. `byRole` customizes the wording (mirrors notify.bidCountered).
+const workEntryCountered = (recipient, booking, entry, byRole) => notifyUser(recipient, {
+  type: 'bid_countered', title: `${byRole === 'buyer' ? 'Buyer' : 'Seller'} Countered the Hours 🔁`,
+  body: `${byRole === 'buyer' ? 'The buyer' : 'The seller'} offered ${entry.counter_hours}h instead of ${entry.hours}h on "${booking.title}".`,
+  data: { type: 'bid_countered', booking_id: String(booking.id), work_entry_id: String(entry.id) },
+});
+
+// Fired once a work entry is actually settled — from the Buyer's approve, the
+// Seller's accept-counter, or an Admin's dispute resolution alike.
+const workEntryPaid = (seller, booking, entry) => notifyUser(seller, {
+  type: 'work_accepted', title: 'Payment Received 🎉',
+  body: `You were paid for ${entry.hours}h on "${booking.title}".`,
+  data: { type: 'work_accepted', booking_id: String(booking.id), work_entry_id: String(entry.id) },
+});
+
+// Milestones — same bidirectional-counter negotiation as work entries, on a
+// submitted stage amount instead of logged hours.
+const milestoneCountered = (recipient, booking, milestone, byRole) => notifyUser(recipient, {
+  type: 'bid_countered', title: `${byRole === 'buyer' ? 'Buyer' : 'Seller'} Countered the Amount 🔁`,
+  body: `${byRole === 'buyer' ? 'The buyer' : 'The seller'} offered $${milestone.counter_amount} instead of $${milestone.amount} for "${milestone.title}".`,
+  data: { type: 'bid_countered', booking_id: String(booking.id), milestone_id: String(milestone.id) },
+});
+
 const bookingCancelledBySeller = (buyer, booking) => notifyUser(buyer, {
   type: 'booking_cancelled', title: 'Booking Cancelled',
   body: `Your booking "${booking.title}" was cancelled by the seller.`,
@@ -450,6 +481,10 @@ module.exports = {
   workSubmitted,
   workAccepted,
   disputeRaised,
+  workEntrySubmitted,
+  workEntryCountered,
+  workEntryPaid,
+  milestoneCountered,
   bookingCancelledBySeller,
   bookingCancelledByBuyer,
   // reviews

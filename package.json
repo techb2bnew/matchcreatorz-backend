@@ -32,7 +32,7 @@
     "stripe": "^22.3.2",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
-    "twilio": "^6.0.2",
+    "twilio": "^6.1.0",
     "uuid": "^10.0.0",
     "web-push": "^3.6.7"
   },

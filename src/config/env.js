@@ -36,10 +36,11 @@ const env = {
   SMTP_PASS:     process.env.SMTP_PASS     || '',
   EMAIL_FROM:    process.env.EMAIL_FROM    || '"MatchCreatorz" <noreply@matchcreatorz.com>',
 
-  // Twilio SMS
-  TWILIO_ACCOUNT_SID:  process.env.TWILIO_ACCOUNT_SID  || '',
-  TWILIO_AUTH_TOKEN:   process.env.TWILIO_AUTH_TOKEN    || '',
-  TWILIO_PHONE_NUMBER: process.env.TWILIO_PHONE_NUMBER  || '',
+  // Twilio Verify (phone OTP)
+  TWILIO_ACCOUNT_SID:        process.env.TWILIO_ACCOUNT_SID        || '',
+  TWILIO_API_KEY_SID:        process.env.TWILIO_API_KEY_SID        || '',
+  TWILIO_API_KEY_SECRET:     process.env.TWILIO_API_KEY_SECRET     || '',
+  TWILIO_VERIFY_SERVICE_SID: process.env.TWILIO_VERIFY_SERVICE_SID || '',
 
   // AWS S3
   AWS_S3_ACCESS_KEY_ID:     process.env.AWS_S3_ACCESS_KEY_ID     || '',

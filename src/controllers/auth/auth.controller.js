@@ -39,8 +39,11 @@ const { authSchemas } = require('../../helpers/validation.helper');
  *           example: SELLER
  *         phone:
  *           type: string
- *           description: "⬜ Optional — all roles"
+ *           description: "⬜ Optional — all roles. If present, must already be verified via /send-phone-otp + /verify-phone-otp (see phoneVerifyToken)"
  *           example: "+919876543210"
+ *         phoneVerifyToken:
+ *           type: string
+ *           description: "✅ Required if phone is present — the token returned by /verify-phone-otp after confirming the phone OTP. Its phone number must match `phone`."
  *         profile_image:
  *           type: string
  *           format: uri
@@ -293,70 +296,12 @@ const resendOtp = async (req, res, next) => {
 
 /**
  * @swagger
- * /api/v1/auth/verify-phone-otp:
+ * /api/v1/auth/send-phone-otp:
  *   post:
- *     summary: Verify phone OTP sent via SMS
+ *     summary: Send a phone OTP via Twilio Verify
  *     description: |
- *       Verifies the 6-digit OTP sent to the user's phone number via SMS (Twilio).
- *       On success, marks `is_phone_verified = true` and clears the OTP from DB.
- *     tags: [Auth]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [phone, otp]
- *             properties:
- *               phone:
- *                 type: string
- *                 description: "Phone number in E.164 format (with country code)"
- *                 example: "+919876543210"
- *               otp:
- *                 type: string
- *                 description: "6-digit OTP received via SMS"
- *                 example: "847293"
- *     responses:
- *       200:
- *         description: Phone verified successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success: { type: boolean, example: true }
- *                 message: { type: string, example: "Phone verified successfully" }
- *                 data:
- *                   type: object
- *                   properties:
- *                     is_phone_verified: { type: boolean, example: true }
- *       400:
- *         description: Invalid OTP / OTP expired / Phone already verified
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success: { type: boolean, example: false }
- *                 message: { type: string, example: "OTP expired. Please request a new one" }
- *       404:
- *         description: Phone number not found
- */
-const verifyPhoneOtp = async (req, res, next) => {
-  try {
-    const result = await authService.verifyPhoneOtp(req.body);
-    return response.success(res, 'Phone verified successfully', result);
-  } catch (err) { next(err); }
-};
-
-/**
- * @swagger
- * /api/v1/auth/resend-phone-otp:
- *   post:
- *     summary: Resend OTP to phone via SMS
- *     description: |
- *       Generates a new 6-digit OTP and sends it to the registered phone number via SMS (Twilio).
- *       Previous OTP is overwritten. OTP is valid for 10 minutes.
+ *       Shared by signup's phone-verify step and forgot-password's phone tab.
+ *       Twilio Verify manages the code and its expiry — nothing is stored on our side.
  *     tags: [Auth]
  *     requestBody:
  *       required: true
@@ -366,29 +311,46 @@ const verifyPhoneOtp = async (req, res, next) => {
  *             type: object
  *             required: [phone]
  *             properties:
- *               phone:
- *                 type: string
- *                 description: "Registered phone number in E.164 format"
- *                 example: "+919876543210"
+ *               phone: { type: string, example: "+919876543210" }
  *     responses:
- *       200:
- *         description: OTP resent successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success: { type: boolean, example: true }
- *                 message: { type: string, example: "OTP resent to your phone" }
- *       400:
- *         description: Phone already verified
- *       404:
- *         description: Phone number not found
+ *       200: { description: OTP sent }
+ *       400: { description: Could not send OTP }
  */
-const resendPhoneOtp = async (req, res, next) => {
+const sendPhoneOtp = async (req, res, next) => {
   try {
-    await authService.resendPhoneOtp(req.body);
-    return response.success(res, 'OTP resent to your phone');
+    const result = await authService.sendPhoneOtpService(req.body);
+    return response.success(res, 'OTP sent to your phone', result);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
+ * /api/v1/auth/verify-phone-otp:
+ *   post:
+ *     summary: Verify a phone OTP (signup) → phone-verify token
+ *     description: |
+ *       Used by signup's phone-verify step. On success, returns a short-lived
+ *       `phoneVerifyToken` (valid 15 minutes) — pass it along with `phone` to
+ *       `/register` to complete account creation with a verified phone.
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [phone, otp]
+ *             properties:
+ *               phone: { type: string, example: "+919876543210" }
+ *               otp:   { type: string, example: "847293" }
+ *     responses:
+ *       200: { description: OTP verified — phoneVerifyToken returned }
+ *       400: { description: Invalid or expired OTP }
+ */
+const verifyPhoneOtp = async (req, res, next) => {
+  try {
+    const result = await authService.verifyPhoneOtpService(req.body);
+    return response.success(res, 'Phone verified', result);
   } catch (err) { next(err); }
 };
 
@@ -396,12 +358,11 @@ const resendPhoneOtp = async (req, res, next) => {
  * @swagger
  * /api/v1/auth/forgot-password:
  *   post:
- *     summary: Send OTP for password reset (email OR phone)
+ *     summary: Send OTP for password reset by email
  *     description: |
- *       Pass either `email` or `phone` (not both).
- *       - **Email**: sends 6-digit OTP via SMTP to the registered email address.
- *       - **Phone**: sends 6-digit OTP via SMS (Twilio) to the registered phone number.
- *
+ *       Sends a 6-digit OTP via SMTP to the registered email address.
+ *       Password reset by phone no longer goes through this endpoint — the frontend
+ *       calls `/send-phone-otp` + `/verify-forgot-phone` instead.
  *       OTP is valid for the duration set in `OTP_EXPIRES_MIN` env variable.
  *     tags: [Auth]
  *     requestBody:
@@ -410,16 +371,12 @@ const resendPhoneOtp = async (req, res, next) => {
  *         application/json:
  *           schema:
  *             type: object
+ *             required: [email]
  *             properties:
  *               email:
  *                 type: string
  *                 format: email
- *                 description: "Registered email address (use this OR phone)"
  *                 example: "john@example.com"
- *               phone:
- *                 type: string
- *                 description: "Registered phone in E.164 format (use this OR email)"
- *                 example: "+919876543210"
  *     responses:
  *       200:
  *         description: OTP sent
@@ -433,17 +390,16 @@ const resendPhoneOtp = async (req, res, next) => {
  *                 data:
  *                   type: object
  *                   properties:
- *                     via: { type: string, enum: [email, phone], example: "email" }
+ *                     via: { type: string, enum: [email], example: "email" }
  *       404:
- *         description: No account found with given email / phone
+ *         description: No account found with given email
  *       403:
  *         description: Account is banned
  */
 const forgotPassword = async (req, res, next) => {
   try {
-    const result = await authService.forgotPasswordByPhone(req.body);
-    const via    = result?.via === 'email' ? 'your email' : 'your phone';
-    return response.success(res, `OTP sent to ${via}`, result);
+    const result = await authService.forgotPasswordByEmail(req.body);
+    return response.success(res, 'OTP sent to your email', result);
   } catch (err) { next(err); }
 };
 
@@ -451,9 +407,9 @@ const forgotPassword = async (req, res, next) => {
  * @swagger
  * /api/v1/auth/verify-forgot-otp:
  *   post:
- *     summary: Verify OTP for password reset (email OR phone)
+ *     summary: Verify email OTP for password reset
  *     description: |
- *       Pass the same identifier (`email` or `phone`) used in `/forgot-password` along with the OTP.
+ *       Pass the `email` used in `/forgot-password` along with the OTP.
  *       On success, returns a short-lived `reset_token` (valid 15 minutes) for `/reset-password`.
  *     tags: [Auth]
  *     requestBody:
@@ -462,17 +418,12 @@ const forgotPassword = async (req, res, next) => {
  *         application/json:
  *           schema:
  *             type: object
- *             required: [otp]
+ *             required: [email, otp]
  *             properties:
  *               email:
  *                 type: string
  *                 format: email
- *                 description: "Use this OR phone"
  *                 example: "john@example.com"
- *               phone:
- *                 type: string
- *                 description: "Use this OR email (E.164 format)"
- *                 example: "+919876543210"
  *               otp:
  *                 type: string
  *                 description: "6-digit OTP received"
@@ -497,12 +448,61 @@ const forgotPassword = async (req, res, next) => {
  *       400:
  *         description: Invalid or expired OTP
  *       404:
- *         description: Email / phone not found
+ *         description: Email not found
  */
 const verifyForgotOtp = async (req, res, next) => {
   try {
-    const result = await authService.verifyForgotPhoneOtp(req.body);
+    const result = await authService.verifyForgotEmailOtp(req.body);
     return response.success(res, 'OTP verified', result);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
+ * /api/v1/auth/verify-forgot-phone:
+ *   post:
+ *     summary: Verify phone OTP for password reset → reset token
+ *     description: |
+ *       Pass the `phone` used in `/send-phone-otp` along with the OTP.
+ *       On success, returns a short-lived `reset_token` (valid 15 minutes) for `/reset-password`.
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [phone, otp]
+ *             properties:
+ *               phone: { type: string, example: "+919876543210" }
+ *               otp:   { type: string, example: "847293" }
+ *     responses:
+ *       200:
+ *         description: OTP verified — reset token returned
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 message: { type: string, example: "Phone verified" }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     reset_token:
+ *                       type: string
+ *                       example: "a3f9e2c1-8b47-4d20-9c11-f0e1a2b3c4d5"
+ *       400:
+ *         description: Invalid or expired OTP
+ *       404:
+ *         description: No account found with this phone number
+ *       403:
+ *         description: Account is banned
+ */
+const verifyForgotPhone = async (req, res, next) => {
+  try {
+    const result = await authService.verifyPhoneForReset(req.body);
+    return response.success(res, 'Phone verified', result);
   } catch (err) { next(err); }
 };
 
@@ -640,7 +640,7 @@ const apple = async (req, res, next) => {
 module.exports = {
   register, login, logout,
   verifyOtp, resendOtp,
-  verifyPhoneOtp, resendPhoneOtp,
-  forgotPassword, verifyForgotOtp, resetPassword,
+  sendPhoneOtp, verifyPhoneOtp,
+  forgotPassword, verifyForgotOtp, verifyForgotPhone, resetPassword,
   google, apple,
 };
