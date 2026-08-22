@@ -6,6 +6,13 @@ const { stripHtml }               = require('../../helpers/text.helper');
 const { computeFee }              = require('../../config/fee');
 
 const BUYER_ATTRS = ['id', 'name', 'email'];
+const MAX_QUESTIONS = 10;
+
+// Normalizes to trimmed, non-empty strings, capped at MAX_QUESTIONS.
+const normalizeQuestions = (questions) => {
+  const arr = Array.isArray(questions) ? questions : [];
+  return arr.map((q) => String(q || '').trim()).filter(Boolean).slice(0, MAX_QUESTIONS);
+};
 
 // ── List buyer's own jobs ─────────────────────────────────────────────
 /**
@@ -169,13 +176,17 @@ exports.getJob = async (req, res) => {
  *               deadline:         { type: string, format: date }
  *               skills:           { type: array, items: { type: string } }
  *               experience_level: { type: string, enum: [any, beginner, intermediate, expert] }
+ *               questions:
+ *                 type: array
+ *                 items: { type: string }
+ *                 description: Custom screening questions — every bidder must answer each one to place a bid (max 10)
  *     responses:
  *       201:
  *         description: Job created
  */
 exports.createJob = async (req, res) => {
   try {
-    const { title, description, category, job_type, budget_min, budget_max, deadline, skills, experience_level, attachments } = req.body;
+    const { title, description, category, job_type, budget_min, budget_max, deadline, skills, experience_level, attachments, questions } = req.body;
     if (!title || !title.trim()) return res.status(400).json({ success: false, message: 'Title is required' });
 
     const skillsArr = Array.isArray(skills)
@@ -196,6 +207,7 @@ exports.createJob = async (req, res) => {
       skills: skillsArr,
       experience_level: experience_level || 'any',
       attachments: Array.isArray(attachments) ? attachments : [],
+      questions: normalizeQuestions(questions),
       status: 'OPEN',
     });
 
@@ -234,6 +246,10 @@ exports.createJob = async (req, res) => {
  *               deadline:         { type: string }
  *               skills:           { type: array }
  *               experience_level: { type: string }
+ *               questions:
+ *                 type: array
+ *                 items: { type: string }
+ *                 description: Custom screening questions (max 10) — replaces the existing list
  *     responses:
  *       200:
  *         description: Job updated
@@ -244,7 +260,7 @@ exports.updateJob = async (req, res) => {
     if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
     if (job.status !== 'OPEN') return res.status(400).json({ success: false, message: 'Only OPEN jobs can be edited' });
 
-    const { title, description, category, job_type, budget_min, budget_max, deadline, skills, experience_level, attachments } = req.body;
+    const { title, description, category, job_type, budget_min, budget_max, deadline, skills, experience_level, attachments, questions } = req.body;
 
     const skillsArr = Array.isArray(skills)
       ? skills
@@ -263,6 +279,7 @@ exports.updateJob = async (req, res) => {
       skills:           skillsArr,
       experience_level: experience_level ?? job.experience_level,
       attachments:      Array.isArray(attachments) ? attachments : job.attachments,
+      questions:        Array.isArray(questions) ? normalizeQuestions(questions) : job.questions,
     });
 
     return res.json({ success: true, message: 'Job updated', data: job });

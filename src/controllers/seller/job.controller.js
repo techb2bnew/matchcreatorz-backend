@@ -7,6 +7,24 @@ const { stripHtml }               = require('../../helpers/text.helper');
 const { computeFee }              = require('../../config/fee');
 const MAX_BID_ATTACHMENTS = 5;
 
+// Zips the job's screening questions with the seller's submitted answers into
+// self-contained { question, answer } pairs — throws a 400-shaped error if
+// the job has questions and any of them wasn't answered.
+const buildQuestionAnswers = (job, answers) => {
+  const questions = Array.isArray(job.questions) ? job.questions : [];
+  if (questions.length === 0) return [];
+
+  const ansArr = Array.isArray(answers) ? answers : [];
+  const pairs = questions.map((question, i) => ({
+    question,
+    answer: String(ansArr[i] ?? '').trim(),
+  }));
+  if (pairs.some((p) => !p.answer))
+    throw Object.assign(new Error('Please answer all of the buyer\'s questions'), { status: 400 });
+
+  return pairs;
+};
+
 // ── Browse open jobs ──────────────────────────────────────────────────
 /**
  * @swagger
@@ -160,11 +178,15 @@ exports.getJobDetail = async (req, res) => {
  *               amount:        { type: number }
  *               delivery_days: { type: integer }
  *               proposal:      { type: string }
+ *               answers:
+ *                 type: array
+ *                 items: { type: string }
+ *                 description: Answers to job.questions, in the same order — required if the job has any questions
  *     responses:
  *       201:
  *         description: Bid placed
  *       400:
- *         description: Already bid or job not open
+ *         description: Already bid, job not open, or a question wasn't answered
  */
 exports.placeBid = async (req, res) => {
   try {
@@ -174,9 +196,16 @@ exports.placeBid = async (req, res) => {
     const existing = await Bid.findOne({ where: { job_id: job.id, seller_id: req.user.id } });
     if (existing) return res.status(400).json({ success: false, message: 'You have already bid on this job' });
 
-    const { amount, delivery_days, proposal, attachments } = req.body;
+    const { amount, delivery_days, proposal, attachments, answers } = req.body;
     if (!amount || !delivery_days)
       return res.status(400).json({ success: false, message: 'Amount and delivery days are required' });
+
+    let questionAnswers;
+    try {
+      questionAnswers = buildQuestionAnswers(job, answers);
+    } catch (err) {
+      return res.status(err.status || 400).json({ success: false, message: err.message });
+    }
 
     // Connects gate: seller must have enough connects to bid
     const bidCost = await getBidCost();
@@ -195,6 +224,7 @@ exports.placeBid = async (req, res) => {
       delivery_days: Number(delivery_days),
       proposal:      proposal || null,
       attachments:   Array.isArray(attachments) ? attachments.slice(0, MAX_BID_ATTACHMENTS) : [],
+      question_answers: questionAnswers,
       status:        'pending',
     });
 
@@ -243,6 +273,10 @@ exports.placeBid = async (req, res) => {
  *               amount:        { type: number, description: Updated bid amount }
  *               delivery_days: { type: integer, description: Updated delivery days }
  *               proposal:      { type: string, description: Updated proposal text }
+ *               answers:
+ *                 type: array
+ *                 items: { type: string }
+ *                 description: Answers to job.questions, in the same order — required if the job has any questions
  *     responses:
  *       200:
  *         description: Bid updated successfully
@@ -257,9 +291,16 @@ exports.updateBid = async (req, res) => {
     const bid = await Bid.findOne({ where: { job_id: job.id, seller_id: req.user.id } });
     if (!bid) return res.status(404).json({ success: false, message: 'You have not bid on this job' });
 
-    const { amount, delivery_days, proposal, attachments } = req.body;
+    const { amount, delivery_days, proposal, attachments, answers } = req.body;
     if (!amount || !delivery_days)
       return res.status(400).json({ success: false, message: 'Amount and delivery days are required' });
+
+    let questionAnswers;
+    try {
+      questionAnswers = answers !== undefined ? buildQuestionAnswers(job, answers) : bid.question_answers;
+    } catch (err) {
+      return res.status(err.status || 400).json({ success: false, message: err.message });
+    }
 
     await bid.update({
       amount:        Number(amount),
@@ -267,6 +308,7 @@ exports.updateBid = async (req, res) => {
       proposal:      proposal || bid.proposal,
       // Explicit [] must be respected so the seller can remove all attachments
       attachments:   Array.isArray(attachments) ? attachments.slice(0, MAX_BID_ATTACHMENTS) : bid.attachments,
+      question_answers: questionAnswers,
     });
 
     return res.json({ success: true, message: 'Bid updated successfully', data: bid });

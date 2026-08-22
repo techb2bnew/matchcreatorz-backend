@@ -62,6 +62,16 @@ const Job = sequelize.define('Job', {
     defaultValue: [],
   },
 
+  // Custom screening questions the buyer wants every bidder to answer —
+  // array of plain strings. Answers live on the Bid, not here (see
+  // Bid.question_answers), so editing/removing a question later never
+  // retroactively breaks an already-submitted answer.
+  questions: {
+    type:         DataTypes.JSONB,
+    allowNull:    true,
+    defaultValue: [],
+  },
+
   experience_level: {
     type:         DataTypes.ENUM('any', 'beginner', 'intermediate', 'expert'),
     allowNull:    false,

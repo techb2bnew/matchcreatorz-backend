@@ -41,6 +41,15 @@ const Bid = sequelize.define('Bid', {
     defaultValue: [],
   },
 
+  // Seller's answers to the buyer's Job.questions, snapshotted as
+  // { question, answer } pairs — self-contained so this stays accurate even
+  // if the buyer later edits or removes a question on the job.
+  question_answers: {
+    type:         DataTypes.JSONB,
+    allowNull:    false,
+    defaultValue: [],
+  },
+
   status: {
     type:         DataTypes.ENUM('pending', 'countered', 'accepted', 'rejected'),
     allowNull:    false,
