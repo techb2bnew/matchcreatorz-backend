@@ -93,6 +93,7 @@ const getCategoryById = async (req, res, next) => {
  *               name:        { type: string, example: "Photography" }
  *               icon:        { type: string, example: "📷" }
  *               description: { type: string, example: "All photography services" }
+ *               parent_id:   { type: integer, nullable: true, description: "Set to make this a subcategory of another (top-level) category" }
  *     responses:
  *       201:
  *         description: Category created

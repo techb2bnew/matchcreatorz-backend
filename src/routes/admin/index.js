@@ -18,6 +18,8 @@ const { listNotifications, getUnreadCount, markOneRead, markAllRead, deleteOne }
 const { registerFcmToken, clearFcmToken } = require('../../controllers/shared/fcm.controller');
 const { listBanners, createBanner, updateBanner, deleteBanner } = require('../../controllers/admin/banner.controller');
 const { listPages, updatePage } = require('../../controllers/admin/page.controller');
+const { listFaqs, addFaq, editFaq, deleteFaq, moveFaq } = require('../../controllers/admin/faq.controller');
+const { listSubscribers, deleteSubscriber } = require('../../controllers/admin/newsletter.controller');
 const { listReportTypes, getReport, exportReport } = require('../../controllers/admin/report.controller');
 const { sendBroadcast, listBroadcasts } = require('../../controllers/admin/broadcast.controller');
 
@@ -122,6 +124,17 @@ router.delete('/banners/:id',  deleteBanner);
 // ── Static Pages ───────────────────────────────────────────────────────
 router.get ('/pages',      listPages);
 router.put ('/pages/:id',  updatePage);
+
+// ── FAQ ────────────────────────────────────────────────────────────────
+router.get   ('/faqs',           listFaqs);
+router.post  ('/faqs',           addFaq);
+router.put   ('/faqs/:id',       editFaq);
+router.delete('/faqs/:id',       deleteFaq);
+router.patch ('/faqs/:id/move',  moveFaq);
+
+// ── Newsletter ─────────────────────────────────────────────────────────
+router.get   ('/newsletter',     listSubscribers);
+router.delete('/newsletter/:id', deleteSubscriber);
 
 // ── Reports ────────────────────────────────────────────────────────────
 router.get('/reports/types',        listReportTypes);

@@ -12,8 +12,6 @@ const DEFAULT_PAGES = [
     content: 'Your privacy is important to us. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our platform.' },
   { slug: 'terms',   title: 'Terms of Service',
     content: 'By accessing and using MatchCreatorz, you accept and agree to be bound by the terms and provision of this agreement.' },
-  { slug: 'faq',     title: 'FAQ',
-    content: 'Frequently Asked Questions about MatchCreatorz. Find answers to common questions about payments, bookings, connects, and more.' },
   { slug: 'contact', title: 'Contact Us',
     content: 'Get in touch with our support team. Email: support@matchcreatorz.com' },
 ];

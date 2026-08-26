@@ -26,6 +26,8 @@ const Withdrawal         = require('./withdrawal.model');
 const Feedback           = require('./feedback.model');
 const Banner             = require('./banner.model');
 const Page               = require('./page.model');
+const Faq                = require('./faq.model');
+const NewsletterSubscriber = require('./newsletterSubscriber.model');
 const Broadcast          = require('./broadcast.model');
 
 // ── Associations ──────────────────────────────────────────
@@ -45,6 +47,10 @@ Service.belongsTo(User, { foreignKey: 'seller_id', as: 'seller' });
 // Category ↔ Services (1:many)
 Category.hasMany(Service, { foreignKey: 'category_id', as: 'services' });
 Service.belongsTo(Category, { foreignKey: 'category_id', as: 'category' });
+
+// Category ↔ Category (self-referencing, 1:many) — subcategories
+Category.hasMany(Category, { foreignKey: 'parent_id', as: 'subcategories' });
+Category.belongsTo(Category, { foreignKey: 'parent_id', as: 'parent' });
 
 // User ↔ Jobs (1:many)
 User.hasMany(Job, { foreignKey: 'buyer_id', as: 'jobs' });
@@ -184,6 +190,8 @@ const db = {
   Feedback,
   Banner,
   Page,
+  Faq,
+  NewsletterSubscriber,
   Broadcast,
 };
 

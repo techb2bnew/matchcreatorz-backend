@@ -36,6 +36,16 @@ const Category = sequelize.define('Category', {
     defaultValue: 0,
   },
 
+  // Self-referencing — a subcategory is just a Category row with a parent.
+  // Null = top-level category. See models/index.js for the hasMany/belongsTo
+  // self-association (as: 'subcategories' / as: 'parent').
+  parent_id: {
+    type:       DataTypes.INTEGER,
+    allowNull:  true,
+    references: { model: 'categories', key: 'id' },
+    onDelete:   'CASCADE',
+  },
+
 }, {
   tableName:   'categories',
   timestamps:  true,
