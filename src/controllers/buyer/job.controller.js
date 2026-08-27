@@ -4,6 +4,7 @@ const { Op, literal }             = require('sequelize');
 const notify                      = require('../../helpers/notification.helper');
 const { stripHtml }               = require('../../helpers/text.helper');
 const { computeFee }              = require('../../config/fee');
+const escrow                      = require('../../services/shared/escrow.service');
 
 const BUYER_ATTRS = ['id', 'name', 'email'];
 const MAX_QUESTIONS = 10;
@@ -549,6 +550,7 @@ exports.acceptBid = async (req, res) => {
     // For hourly jobs, effAmount is the agreed $/hr rate — the total (and its fee)
     // isn't known until the seller logs hours per work entry.
     const fee = isHourly ? 0 : computeFee(effAmount);
+    const payment_mode = await escrow.resolvePaymentMode(job.job_type || 'fixed');
 
     // No wallet charge here — payment is deferred until the seller actually
     // submits work. The bid/job/booking updates still happen atomically.
@@ -574,6 +576,7 @@ exports.acceptBid = async (req, res) => {
         title:         job.title,
         amount:        effAmount,
         platform_fee:  fee,
+        payment_mode,
         job_type:      job.job_type || 'fixed',
         hourly_rate:   isHourly ? effAmount : null,
         delivery_days: effDelivery,

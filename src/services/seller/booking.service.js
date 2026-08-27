@@ -6,6 +6,7 @@ const wallet                          = require('../wallet/wallet.service');
 const { computeFee }                  = require('../../config/fee');
 const { settleWorkEntry }             = require('../shared/workEntry.service');
 const { settleMilestone }             = require('../shared/milestone.service');
+const escrow                          = require('../shared/escrow.service');
 
 const INCLUDE = [
   { model: User,    as: 'buyer',   attributes: ['id', 'name'] },
@@ -228,6 +229,14 @@ exports.createMilestones = async (sellerId, id, milestones) => {
   if (existing > 0)
     throw Object.assign(new Error('Milestones are already set up for this booking'), { status: 400 });
 
+  // Escrow: a whole-booking hold may already have been placed at commitment
+  // time (before the seller decided to split into milestones). Payment now
+  // happens per-milestone instead, so release that hold before proceeding.
+  if (booking.payment_mode === 'escrow' && booking.payment_status === 'held') {
+    await escrow.cancelHold(booking);
+    await booking.update({ payment_status: 'unpaid' });
+  }
+
   if (!Array.isArray(milestones) || milestones.length < 2)
     throw Object.assign(new Error('Provide at least 2 milestones'), { status: 400 });
 
@@ -283,6 +292,29 @@ exports.submitMilestone = async (sellerId, id, milestoneId, { attachments, notes
 // Seller accepts the buyer's counter (submitted at $150, buyer offered $100,
 // seller agrees) — settles at the countered amount.
 exports.acceptMilestoneCounterBySeller = async (sellerId, id, milestoneId) => {
+  // Escrow diversion: the seller agreeing to the buyer's counter can't itself
+  // charge the buyer's card (no buyer browser session to redirect here). Fold
+  // the counter into the milestone's own amount and hand it back to 'submitted'
+  // so the buyer's normal Accept & Pay flow (acceptMilestone) picks it up and
+  // creates the Stripe Checkout. Wallet mode is untouched below.
+  const preBooking = await Booking.findOne({ where: { id, seller_id: sellerId } });
+  if (preBooking && preBooking.payment_mode === 'escrow') {
+    const milestone = await BookingMilestone.findOne({ where: { id: milestoneId, booking_id: preBooking.id } });
+    if (!milestone) throw Object.assign(new Error('Milestone not found'), { status: 404 });
+    if (milestone.status !== 'countered' || milestone.counter_by !== 'buyer')
+      throw Object.assign(new Error('There is no buyer counter to accept on this milestone'), { status: 400 });
+
+    await milestone.update({
+      amount: Number(milestone.counter_amount),
+      status: 'submitted',
+      counter_amount: null, counter_by: null, counter_note: null,
+    });
+
+    const buyer = await User.findByPk(preBooking.buyer_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
+    if (buyer) notify.workSubmitted(buyer, preBooking); // reuse: "please review/pay" ping
+    return milestone;
+  }
+
   try {
     return await sequelize.transaction(async (t) => {
       const booking = await Booking.findOne({
@@ -340,14 +372,22 @@ exports.cancelBooking = async (sellerId, id, cancel_reason) => {
     throw Object.assign(new Error('Cannot cancel booking at this stage'), { status: 400 });
 
   // Refund the held escrow back to the buyer.
+  const wasHeld = booking.payment_status === 'held';
+  const isEscrow = booking.payment_mode === 'escrow';
+
+  // Escrow: release the Stripe hold BEFORE opening the DB transaction — a
+  // Stripe network call must never happen while holding row locks.
+  if (wasHeld && isEscrow) {
+    await escrow.cancelHold(booking);
+  }
+
   await sequelize.transaction(async (t) => {
-    const wasHeld = booking.payment_status === 'held';
     await booking.update({
       status: 'cancelled',
       cancel_reason: cancel_reason || null,
       payment_status: wasHeld ? 'refunded' : booking.payment_status,
     }, { transaction: t });
-    if (wasHeld) {
+    if (wasHeld && !isEscrow) {
       await wallet.credit(booking.buyer_id, Number(booking.amount), {
         type: 'booking_refund', booking_id: booking.id,
         note: `Refund for booking #${booking.id} cancelled by seller`,

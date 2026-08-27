@@ -27,7 +27,7 @@ const {
   getJobBids, acceptBid, rejectBid, counterBid, getJobStats,
 } = require('../../controllers/buyer/job.controller');
 const { searchServices } = require('../../controllers/buyer/service.controller');
-const { listBookings, getBooking, createBooking, acceptWork, rejectWork, cancelBooking, acceptMilestone, rejectMilestone, counterMilestone, approveWorkEntry, counterWorkEntry, disputeWorkEntry } = require('../../controllers/buyer/booking.controller');
+const { listBookings, getBooking, createBooking, acceptWork, rejectWork, cancelBooking, acceptMilestone, rejectMilestone, counterMilestone, approveWorkEntry, counterWorkEntry, disputeWorkEntry, createEscrowCheckout, confirmEscrowCheckout } = require('../../controllers/buyer/booking.controller');
 const { createReview, listReviews } = require('../../controllers/buyer/review.controller');
 const { getStats: getBuyerStats }  = require('../../controllers/buyer/stats.controller');
 const { listFavourites, listFavouriteIds, addFavourite, removeFavourite } = require('../../controllers/buyer/favourite.controller');
@@ -64,6 +64,8 @@ router.get('/services', searchServices);
 router.get   ('/bookings',              listBookings);
 router.post  ('/bookings',              createBooking);
 router.get   ('/bookings/:id',          getBooking);
+router.post  ('/bookings/:id/escrow/checkout', createEscrowCheckout);
+router.get   ('/bookings/:id/escrow/confirm',  confirmEscrowCheckout);
 router.patch ('/bookings/:id/accept',   acceptWork);
 router.patch ('/bookings/:id/reject',   rejectWork);
 router.patch ('/bookings/:id/cancel',   cancelBooking);

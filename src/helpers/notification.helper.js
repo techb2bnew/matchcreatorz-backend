@@ -266,6 +266,14 @@ const milestoneCountered = (recipient, booking, milestone, byRole) => notifyUser
   data: { type: 'bid_countered', booking_id: String(booking.id), milestone_id: String(milestone.id) },
 });
 
+// Whole-booking escrow hold is a manual-capture PaymentIntent — Stripe
+// auto-cancels it ~7 days after creation if never captured. One-time reminder.
+const escrowExpiringSoon = (buyer, booking) => notifyUser(buyer, {
+  type: 'booking_payment', title: 'Escrow Hold Expiring Soon ⏳',
+  body: `Your escrow payment for "${booking.title}" will expire soon unless the work is accepted. Please review and accept if it's ready.`,
+  data: { type: 'escrow_expiring', booking_id: String(booking.id) },
+});
+
 const bookingCancelledBySeller = (buyer, booking) => notifyUser(buyer, {
   type: 'booking_cancelled', title: 'Booking Cancelled',
   body: `Your booking "${booking.title}" was cancelled by the seller.`,
@@ -485,6 +493,7 @@ module.exports = {
   workEntryCountered,
   workEntryPaid,
   milestoneCountered,
+  escrowExpiringSoon,
   bookingCancelledBySeller,
   bookingCancelledByBuyer,
   // reviews

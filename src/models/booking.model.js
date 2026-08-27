@@ -99,6 +99,35 @@ const Booking = sequelize.define('Booking', {
     defaultValue: 'unpaid',
   },
 
+  // Snapshotted once at Booking.create() from the Admin escrow toggle at that
+  // moment — never changed afterward, so flipping the toggle mid-flight never
+  // affects an existing booking. 'wallet' = today's deferred wallet-debit flow
+  // (unchanged). 'escrow' = real Stripe hold/charge (see services/shared/escrow.service.js).
+  payment_mode: {
+    type:         DataTypes.ENUM('wallet', 'escrow'),
+    allowNull:    false,
+    defaultValue: 'wallet',
+  },
+
+  // Stripe PaymentIntent backing the whole-booking manual-capture hold
+  // (escrow mode, non-milestone bookings only).
+  escrow_payment_intent_id: {
+    type:      DataTypes.STRING,
+    allowNull: true,
+  },
+
+  escrow_captured_at: {
+    type:      DataTypes.DATE,
+    allowNull: true,
+  },
+
+  // Set once the 5-day "hold expiring soon" reminder has fired, so the
+  // periodic sweep in server.js never re-notifies for the same booking.
+  escrow_reminder_sent_at: {
+    type:      DataTypes.DATE,
+    allowNull: true,
+  },
+
   notes: {
     type:      DataTypes.TEXT,
     allowNull: true,

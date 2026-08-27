@@ -3,6 +3,7 @@ const { Op, literal }                   = require('sequelize');
 const { sequelize, Booking, BookingMilestone, BookingWorkEntry, User, Service, Job } = require('../../models');
 const wallet                            = require('../../services/wallet/wallet.service');
 const { settleWorkEntry }               = require('../../services/shared/workEntry.service');
+const escrow                            = require('../../services/shared/escrow.service');
 
 const INCLUDE = [
   { model: User,    as: 'buyer',   attributes: ['id', 'name', 'email'] },
@@ -216,10 +217,18 @@ exports.resolveDispute = async (req, res) => {
     // through a dispute), so "favour seller" must charge the buyer here too —
     // gating the whole payout on wasHeld (as this used to) meant it silently
     // paid nothing for every booking created after the escrow model retired.
-    await sequelize.transaction(async (t) => {
-      const wasHeld       = booking.payment_status === 'held';
-      const alreadySettled = ['released', 'refunded'].includes(booking.payment_status);
+    const wasHeld        = booking.payment_status === 'held';
+    const alreadySettled = ['released', 'refunded'].includes(booking.payment_status);
+    const isEscrow        = booking.payment_mode === 'escrow';
 
+    // Escrow: capture/cancel the Stripe hold BEFORE opening the DB transaction
+    // — a Stripe network call must never happen while holding row locks.
+    if (!alreadySettled && wasHeld && isEscrow) {
+      if (resolution === 'completed') await escrow.captureHold(booking);
+      else await escrow.cancelHold(booking);
+    }
+
+    await sequelize.transaction(async (t) => {
       if (resolution === 'completed') {
         // Favour seller → charge buyer (unless already held), release earnings
         // (amount − fee) to seller, platform keeps the fee.
@@ -236,6 +245,7 @@ exports.resolveDispute = async (req, res) => {
               type: 'booking_payment', booking_id: booking.id, note: `Payment for disputed booking #${booking.id}`,
             }, t);
           }
+          // escrow-mode wasHeld: captured via Stripe above, no wallet debit needed.
           await wallet.credit(booking.seller_id, wallet.round2(amount - fee), {
             type: 'earning', booking_id: booking.id, note: `Earning from resolved booking #${booking.id}`,
           }, t);
@@ -252,11 +262,12 @@ exports.resolveDispute = async (req, res) => {
           status: 'cancelled',
           payment_status: alreadySettled ? booking.payment_status : (wasHeld ? 'refunded' : booking.payment_status),
         }, { transaction: t });
-        if (wasHeld) {
+        if (wasHeld && !isEscrow) {
           await wallet.credit(booking.buyer_id, Number(booking.amount), {
             type: 'booking_refund', booking_id: booking.id, note: `Refund for disputed booking #${booking.id}`,
           }, t);
         }
+        // escrow-mode wasHeld: hold cancelled via Stripe above, no wallet credit needed.
       }
     });
     return res.json({ success: true, message: `Dispute resolved as ${resolution}`, data: booking });

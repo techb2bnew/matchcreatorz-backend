@@ -15,6 +15,7 @@ const DEFAULTS = {
     app_name: 'MatchCreatorz', support_email: 'support@matchcreatorz.com',
     support_phone: '', app_version: '1.0.0', timezone: 'Asia/Kolkata', currency: 'INR',
   },
+  escrow_settings: { enabled: false },
 };
 
 /**
@@ -81,7 +82,7 @@ exports.getSettings = async (req, res, next) => {
 exports.updateSettings = async (req, res, next) => {
   try {
     const body = req.body || {};
-    const allowed = ['platform_fees', 'bid_settings', 'connect_plans', 'app_info'];
+    const allowed = ['platform_fees', 'bid_settings', 'connect_plans', 'app_info', 'escrow_settings'];
     const keys = Object.keys(body).filter(k => allowed.includes(k));
     if (keys.length === 0)
       return response.badRequest(res, `Provide at least one of: ${allowed.join(', ')}`);

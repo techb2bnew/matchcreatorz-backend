@@ -5,6 +5,8 @@ const wallet     = require('../../services/wallet/wallet.service');
 const topup      = require('../../services/wallet/topup.service');
 const withdraw   = require('../../services/wallet/withdrawal.service');
 const connectsPurchase = require('../../services/seller/connectsPurchase.service');
+const escrow     = require('../../services/shared/escrow.service');
+const notify     = require('../../helpers/notification.helper');
 const stripe     = require('../../helpers/stripe.helper');
 const response   = require('../../helpers/response.helper');
 const env        = require('../../config/env');
@@ -386,8 +388,27 @@ exports.webhook = async (req, res) => {
       const session = event.data.object;
       if (session.metadata?.kind === 'connects_purchase') {
         await connectsPurchase.creditFromSession(session);
+      } else if (session.metadata?.kind === 'escrow_hold') {
+        const full = await stripe.getCheckoutSessionWithIntent(session.id);
+        await escrow.confirmHold(full);
+      } else if (session.metadata?.kind === 'escrow_milestone_charge') {
+        await escrow.confirmMilestoneCharge(session);
       } else {
         await topup.creditFromSession(session);
+      }
+    } else if (event.type === 'payment_intent.canceled') {
+      // A manual-capture PaymentIntent Stripe auto-cancels ~7 days after
+      // creation if it was never captured (whole-booking escrow hold only).
+      const pi = event.data.object;
+      const booking = await Booking.findOne({ where: { escrow_payment_intent_id: pi.id } });
+      if (booking && booking.payment_status === 'held' && !booking.escrow_captured_at) {
+        await booking.update({ status: 'cancelled', payment_status: 'refunded', cancel_reason: 'Escrow hold expired (not captured within 7 days)' });
+        const [buyer, seller] = await Promise.all([
+          User.findByPk(booking.buyer_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] }),
+          User.findByPk(booking.seller_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] }),
+        ]);
+        if (seller) notify.bookingCancelledByBuyer(seller, booking);
+        if (buyer) notify.bookingCancelledBySeller(buyer, booking); // reuse: generic "booking cancelled" ping
       }
     } else if (event.type === 'account.updated') {
       const acct = event.data.object;

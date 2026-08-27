@@ -104,6 +104,56 @@ exports.createBooking = async (req, res, next) => {
  *       200:
  *         description: Booking completed
  */
+/**
+ * @swagger
+ * /api/v1/buyer/bookings/{id}/escrow/checkout:
+ *   post:
+ *     summary: (Re)create a Stripe Checkout session for an escrow-mode booking's hold
+ *     tags: [Buyer - Bookings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: "{ checkout_url, session_id }" }
+ *       400: { description: Not an escrow booking / already paid }
+ *       404: { description: Not found }
+ */
+exports.createEscrowCheckout = async (req, res, next) => {
+  try {
+    const data = await svc.createEscrowCheckout(req.user.id, req.params.id);
+    return response.success(res, 'Checkout session created', data);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
+ * /api/v1/buyer/bookings/{id}/escrow/confirm:
+ *   get:
+ *     summary: Confirm an escrow checkout session by id (return-page fallback if the webhook is slow)
+ *     tags: [Buyer - Bookings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *       - in: query
+ *         name: session_id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: "{ confirmed }" }
+ */
+exports.confirmEscrowCheckout = async (req, res, next) => {
+  try {
+    const data = await svc.confirmEscrowCheckout(req.user.id, req.params.id, req.query.session_id);
+    return response.success(res, 'Checkout confirmed', data);
+  } catch (err) { next(err); }
+};
+
 exports.acceptWork = async (req, res, next) => {
   try {
     const data = await svc.acceptWork(req.user.id, req.params.id);
