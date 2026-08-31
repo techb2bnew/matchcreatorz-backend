@@ -93,6 +93,11 @@ exports.createBooking = async (req, res, next) => {
  * /api/v1/buyer/bookings/{id}/accept:
  *   patch:
  *     summary: Accept completed work (amidst_completion -> completed)
+ *     description: |
+ *       If the booking is in escrow mode, this captures the Stripe hold (real charge) instead of
+ *       debiting the wallet. Returns 400 "Please complete the escrow payment for this booking first"
+ *       if the buyer never completed the initial hold checkout — on that error, call
+ *       `POST .../escrow/checkout` and redirect the buyer to pay before retrying.
  *     tags: [Buyer - Bookings]
  *     security: [{ bearerAuth: [] }]
  *     parameters:
@@ -103,6 +108,8 @@ exports.createBooking = async (req, res, next) => {
  *     responses:
  *       200:
  *         description: Booking completed
+ *       400:
+ *         description: Booking is not awaiting acceptance, OR (escrow mode) the escrow payment hasn't been completed yet
  */
 /**
  * @swagger
@@ -325,10 +332,61 @@ exports.cancelBooking = async (req, res, next) => {
 
 /**
  * @swagger
+ * /api/v1/buyer/bookings/{id}/milestones:
+ *   post:
+ *     summary: Split a booking's total amount into milestones (buyer-initiated)
+ *     description: |
+ *       Same feature the seller already has — either party can set milestones up on an ongoing
+ *       booking. If the booking is escrow mode and already has a whole-booking hold placed, that
+ *       hold is released first, since payment now happens per-milestone instead.
+ *     tags: [Buyer - Bookings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [milestones]
+ *             properties:
+ *               milestones:
+ *                 type: array
+ *                 minItems: 1
+ *                 items:
+ *                   type: object
+ *                   required: [title, amount]
+ *                   properties:
+ *                     title:         { type: string, example: "Wireframes" }
+ *                     amount:        { type: number, example: 150 }
+ *                     duration_days: { type: integer, nullable: true, example: 3 }
+ *     responses:
+ *       201: { description: Milestones created }
+ *       400: { description: Amounts don't add up to the booking total / already set up }
+ *       404: { description: Not found }
+ */
+exports.createMilestones = async (req, res, next) => {
+  try {
+    const data = await svc.createMilestones(req.user.id, req.params.id, req.body.milestones);
+    return response.created(res, 'Milestones created', data);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
  * /api/v1/buyer/bookings/{id}/milestones/{milestoneId}/accept:
  *   patch:
  *     summary: Accept a submitted milestone (releases that stage's payout to the seller)
- *     description: Once every milestone on a booking is accepted, the booking itself is marked completed automatically.
+ *     description: |
+ *       Once every milestone on a booking is accepted, the booking itself is marked completed automatically.
+ *       If the booking is in escrow mode, this does NOT settle immediately — it instead returns
+ *       `{ escrow: true, checkout_url, session_id }` so the client can redirect the buyer to pay for
+ *       this specific milestone via Stripe Checkout. The milestone is only marked paid once that
+ *       checkout completes (webhook or `GET .../escrow/confirm`).
  *     tags: [Buyer - Bookings]
  *     security: [{ bearerAuth: [] }]
  *     parameters:
@@ -341,7 +399,20 @@ exports.cancelBooking = async (req, res, next) => {
  *         required: true
  *         schema: { type: integer }
  *     responses:
- *       200: { description: Milestone accepted and paid out }
+ *       200:
+ *         description: Milestone accepted and paid out (wallet mode), OR an escrow Checkout session to complete (escrow mode)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               oneOf:
+ *                 - type: object
+ *                   description: Wallet mode — settled immediately
+ *                 - type: object
+ *                   description: Escrow mode — redirect to checkout_url
+ *                   properties:
+ *                     escrow: { type: boolean, example: true }
+ *                     checkout_url: { type: string }
+ *                     session_id: { type: string }
  *       400: { description: Milestone is not awaiting acceptance }
  *       404: { description: Not found }
  */

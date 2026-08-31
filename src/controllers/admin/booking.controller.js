@@ -155,6 +155,10 @@ exports.getBooking = async (req, res) => {
  * /api/v1/admin/bookings/{id}/resolve:
  *   patch:
  *     summary: Resolve a disputed booking
+ *     description: |
+ *       In escrow mode, "completed" captures the Stripe hold (real charge) instead of a wallet
+ *       debit; "cancelled" cancels the hold instead of a wallet refund — no card is ever charged
+ *       for a cancelled escrow dispute.
  *     tags: [Admin - Bookings]
  *     security: [{ bearerAuth: [] }]
  *     parameters:
@@ -170,7 +174,7 @@ exports.getBooking = async (req, res) => {
  *             type: object
  *             required: [resolution]
  *             properties:
- *               resolution: { type: string, enum: [completed, cancelled], description: "completed = favour buyer, cancelled = refund" }
+ *               resolution: { type: string, enum: [completed, cancelled], description: "completed = favour seller (pays out), cancelled = favour buyer (refund)" }
  *     responses:
  *       200:
  *         description: Dispute resolved

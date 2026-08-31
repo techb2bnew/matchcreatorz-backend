@@ -73,6 +73,10 @@ exports.getSettings = async (req, res, next) => {
  *                 items: { type: object }
  *               app_info:
  *                 type: object
+ *               escrow_settings:
+ *                 type: object
+ *                 description: Admin toggle for Stripe-backed escrow payments (fixed-price/milestone bookings). Off by default — existing wallet flow is unaffected until enabled.
+ *                 example: { enabled: false }
  *     responses:
  *       200:
  *         description: Settings saved, returns the full merged settings object

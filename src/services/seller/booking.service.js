@@ -5,7 +5,7 @@ const notify                          = require('../../helpers/notification.help
 const wallet                          = require('../wallet/wallet.service');
 const { computeFee }                  = require('../../config/fee');
 const { settleWorkEntry }             = require('../shared/workEntry.service');
-const { settleMilestone }             = require('../shared/milestone.service');
+const { settleMilestone, createMilestones: createMilestonesShared } = require('../shared/milestone.service');
 const escrow                          = require('../shared/escrow.service');
 
 const INCLUDE = [
@@ -220,14 +220,6 @@ exports.counterWorkEntryBySeller = async (sellerId, id, entryId, { counter_hours
 exports.createMilestones = async (sellerId, id, milestones) => {
   const booking = await Booking.findOne({ where: { id, seller_id: sellerId } });
   if (!booking) throw Object.assign(new Error('Booking not found'), { status: 404 });
-  if (!['ongoing', 'in_dispute'].includes(booking.status))
-    throw Object.assign(new Error('Booking must be ongoing to set up milestones'), { status: 400 });
-  if (booking.job_type === 'hourly')
-    throw Object.assign(new Error('Hourly bookings don\'t support milestones — submit hours as a single delivery'), { status: 400 });
-
-  const existing = await BookingMilestone.count({ where: { booking_id: booking.id } });
-  if (existing > 0)
-    throw Object.assign(new Error('Milestones are already set up for this booking'), { status: 400 });
 
   // Escrow: a whole-booking hold may already have been placed at commitment
   // time (before the seller decided to split into milestones). Payment now
@@ -237,31 +229,7 @@ exports.createMilestones = async (sellerId, id, milestones) => {
     await booking.update({ payment_status: 'unpaid' });
   }
 
-  if (!Array.isArray(milestones) || milestones.length < 2)
-    throw Object.assign(new Error('Provide at least 2 milestones'), { status: 400 });
-
-  const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
-  const clean = milestones.map((m, i) => ({
-    title: String(m.title || '').trim() || `Milestone ${i + 1}`,
-    amount: round2(m.amount),
-    duration_days: m.duration_days ? Math.max(1, Math.round(Number(m.duration_days))) : null,
-    position: i,
-  }));
-  if (clean.some((m) => !m.amount || m.amount <= 0))
-    throw Object.assign(new Error('Every milestone needs a positive amount'), { status: 400 });
-
-  const sum = round2(clean.reduce((s, m) => s + m.amount, 0));
-  if (sum !== round2(booking.amount))
-    throw Object.assign(new Error(`Milestone amounts must add up to the booking total (${booking.amount})`), { status: 400 });
-
-  const rows = await BookingMilestone.bulkCreate(
-    clean.map((m) => ({ ...m, booking_id: booking.id })),
-  );
-
-  const buyer = await User.findByPk(booking.buyer_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
-  if (buyer) notify.workSubmitted(buyer, booking); // reuse: "seller updated this booking" ping
-
-  return rows;
+  return createMilestonesShared(booking, milestones, 'seller');
 };
 
 exports.submitMilestone = async (sellerId, id, milestoneId, { attachments, notes, duration_days } = {}) => {

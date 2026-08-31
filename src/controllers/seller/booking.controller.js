@@ -286,7 +286,7 @@ exports.counterWorkEntryBySeller = async (req, res, next) => {
  *             properties:
  *               milestones:
  *                 type: array
- *                 minItems: 2
+ *                 minItems: 1
  *                 items:
  *                   type: object
  *                   required: [title, amount]
@@ -310,6 +310,11 @@ exports.createMilestones = async (req, res, next) => {
  * /api/v1/seller/bookings/{id}/milestones/{milestoneId}/accept-counter:
  *   patch:
  *     summary: Accept the buyer's counter on a milestone (pays at the countered amount)
+ *     description: |
+ *       In escrow mode this does NOT charge anyone here — the seller has no card to charge. The
+ *       milestone is moved back to "submitted" at the agreed amount instead, and settles once the
+ *       buyer pays via `PATCH /buyer/.../milestones/:id/accept` (which returns a Stripe Checkout
+ *       session for that buyer to complete).
  *     tags: [Seller - Bookings]
  *     security: [{ bearerAuth: [] }]
  *     parameters:
@@ -322,7 +327,7 @@ exports.createMilestones = async (req, res, next) => {
  *         required: true
  *         schema: { type: integer }
  *     responses:
- *       200: { description: Counter accepted and paid }
+ *       200: { description: Counter accepted and paid (wallet mode), or moved back to "submitted" awaiting buyer payment (escrow mode) }
  *       400: { description: No buyer counter to accept on this milestone }
  *       404: { description: Not found }
  *       409: { description: Milestone was already processed (duplicate/retry) }

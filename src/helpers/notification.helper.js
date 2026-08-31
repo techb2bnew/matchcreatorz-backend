@@ -274,6 +274,14 @@ const escrowExpiringSoon = (buyer, booking) => notifyUser(buyer, {
   data: { type: 'escrow_expiring', booking_id: String(booking.id) },
 });
 
+// Either party can split a booking into milestones — notify whichever one
+// didn't set them up.
+const milestonesSetup = (recipient, booking, byRole) => notifyUser(recipient, {
+  type: 'booking_created', title: 'Booking Split into Milestones',
+  body: `${byRole === 'buyer' ? 'The buyer' : 'The seller'} split "${booking.title}" into milestones. Review the stages.`,
+  data: { type: 'booking_created', booking_id: String(booking.id) },
+});
+
 const bookingCancelledBySeller = (buyer, booking) => notifyUser(buyer, {
   type: 'booking_cancelled', title: 'Booking Cancelled',
   body: `Your booking "${booking.title}" was cancelled by the seller.`,
@@ -493,6 +501,7 @@ module.exports = {
   workEntryCountered,
   workEntryPaid,
   milestoneCountered,
+  milestonesSetup,
   escrowExpiringSoon,
   bookingCancelledBySeller,
   bookingCancelledByBuyer,

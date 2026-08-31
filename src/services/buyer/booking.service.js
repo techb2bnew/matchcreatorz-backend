@@ -5,7 +5,7 @@ const notify                          = require('../../helpers/notification.help
 const wallet                          = require('../wallet/wallet.service');
 const { computeFee }                  = require('../../config/fee');
 const { settleWorkEntry }             = require('../shared/workEntry.service');
-const { settleMilestone }             = require('../shared/milestone.service');
+const { settleMilestone, createMilestones: createMilestonesShared } = require('../shared/milestone.service');
 const escrow                          = require('../shared/escrow.service');
 const stripeHelper                    = require('../../helpers/stripe.helper');
 
@@ -297,6 +297,23 @@ exports.disputeWorkEntry = async (buyerId, id, entryId, dispute_reason) => {
 };
 
 // ── Milestones ────────────────────────────────────────────────────────────
+// Same "split into stages" feature the seller has — either party can set
+// milestones up on an ongoing booking, mirrors seller/booking.service.js.
+exports.createMilestones = async (buyerId, id, milestones) => {
+  const booking = await Booking.findOne({ where: { id, buyer_id: buyerId } });
+  if (!booking) throw Object.assign(new Error('Booking not found'), { status: 404 });
+
+  // Escrow: a whole-booking hold may already have been placed at commitment
+  // time (before the buyer decided to split into milestones). Payment now
+  // happens per-milestone instead, so release that hold before proceeding.
+  if (booking.payment_mode === 'escrow' && booking.payment_status === 'held') {
+    await escrow.cancelHold(booking);
+    await booking.update({ payment_status: 'unpaid' });
+  }
+
+  return createMilestonesShared(booking, milestones, 'buyer');
+};
+
 exports.acceptMilestone = async (buyerId, id, milestoneId) => {
   // Escrow diversion: a read-only pre-check outside any lock/transaction — a
   // Stripe network call must never happen while holding a DB row lock. Wallet
