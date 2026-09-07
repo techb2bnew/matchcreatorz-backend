@@ -4,6 +4,7 @@ const { sequelize, Booking, BookingMilestone, BookingWorkEntry, User, Service, J
 const wallet                            = require('../../services/wallet/wallet.service');
 const { settleWorkEntry }               = require('../../services/shared/workEntry.service');
 const escrow                            = require('../../services/shared/escrow.service');
+const stripeHelper                      = require('../../helpers/stripe.helper');
 
 const INCLUDE = [
   { model: User,    as: 'buyer',   attributes: ['id', 'name', 'email'] },
@@ -225,11 +226,14 @@ exports.resolveDispute = async (req, res) => {
     const alreadySettled = ['released', 'refunded'].includes(booking.payment_status);
     const isEscrow        = booking.payment_mode === 'escrow';
 
-    // Escrow: capture/cancel the Stripe hold BEFORE opening the DB transaction
-    // — a Stripe network call must never happen while holding row locks.
-    if (!alreadySettled && wasHeld && isEscrow) {
-      if (resolution === 'completed') await escrow.captureHold(booking);
-      else await escrow.cancelHold(booking);
+    // Legacy only: booking.payment_status only ever reaches 'held' via the
+    // pre-Escrow.com Stripe hold flow (new escrow-mode bookings go straight
+    // from 'unpaid' to 'released', see escrow.service.js) — capture/cancel
+    // that Stripe hold BEFORE opening the DB transaction, a network call must
+    // never happen while holding row locks.
+    if (!alreadySettled && wasHeld && isEscrow && booking.escrow_payment_intent_id) {
+      if (resolution === 'completed') await stripeHelper.capturePaymentIntent(booking.escrow_payment_intent_id);
+      else await stripeHelper.cancelPaymentIntent(booking.escrow_payment_intent_id);
     }
 
     await sequelize.transaction(async (t) => {

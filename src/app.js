@@ -69,6 +69,12 @@ app.post(
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// ── Escrow.com webhook ────────────────────────────────────────
+// Ordinary JSON body — Escrow.com's webhooks have no documented
+// signature/secret verification, so the handler re-fetches the transaction
+// from their API before trusting anything in this payload.
+app.post('/api/v1/wallet/escrow-webhook', require('./controllers/wallet/wallet.controller').escrowComWebhook);
+
 // ── Logger ────────────────────────────────────────────────────
 // Skip logging 404s for paths outside our own API — this is almost always
 // automated vulnerability-scanner noise (.env, .git, wp-config, actuator,

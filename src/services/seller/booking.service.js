@@ -7,6 +7,7 @@ const { computeFee }                  = require('../../config/fee');
 const { settleWorkEntry }             = require('../shared/workEntry.service');
 const { settleMilestone, createMilestones: createMilestonesShared } = require('../shared/milestone.service');
 const escrow                          = require('../shared/escrow.service');
+const stripeHelper                    = require('../../helpers/stripe.helper');
 
 const INCLUDE = [
   { model: User,    as: 'buyer',   attributes: ['id', 'name'] },
@@ -221,11 +222,16 @@ exports.createMilestones = async (sellerId, id, milestones) => {
   const booking = await Booking.findOne({ where: { id, seller_id: sellerId } });
   if (!booking) throw Object.assign(new Error('Booking not found'), { status: 404 });
 
-  // Escrow: a whole-booking hold may already have been placed at commitment
-  // time (before the seller decided to split into milestones). Payment now
-  // happens per-milestone instead, so release that hold before proceeding.
-  if (booking.payment_mode === 'escrow' && booking.payment_status === 'held') {
-    await escrow.cancelHold(booking);
+  // Legacy only: under the old Stripe-based flow a whole-booking hold could
+  // already have been placed at bid-accept time (before the seller decided
+  // to split into milestones). Under the current Escrow.com flow no
+  // transaction exists this early (only created at Accept Work/Accept
+  // Milestone time), so this branch can only fire for bookings created
+  // before the Escrow.com migration.
+  if (booking.payment_mode === 'escrow' && booking.payment_status === 'held' && booking.escrow_payment_intent_id) {
+    await stripeHelper.cancelPaymentIntent(booking.escrow_payment_intent_id).catch((err) => {
+      console.error('seller.booking.createMilestones legacy hold cancel:', err && err.message);
+    });
     await booking.update({ payment_status: 'unpaid' });
   }
 
@@ -264,7 +270,7 @@ exports.acceptMilestoneCounterBySeller = async (sellerId, id, milestoneId) => {
   // charge the buyer's card (no buyer browser session to redirect here). Fold
   // the counter into the milestone's own amount and hand it back to 'submitted'
   // so the buyer's normal Accept & Pay flow (acceptMilestone) picks it up and
-  // creates the Stripe Checkout. Wallet mode is untouched below.
+  // creates the Escrow.com pay transaction. Wallet mode is untouched below.
   const preBooking = await Booking.findOne({ where: { id, seller_id: sellerId } });
   if (preBooking && preBooking.payment_mode === 'escrow') {
     const milestone = await BookingMilestone.findOne({ where: { id: milestoneId, booking_id: preBooking.id } });
@@ -343,10 +349,18 @@ exports.cancelBooking = async (sellerId, id, cancel_reason) => {
   const wasHeld = booking.payment_status === 'held';
   const isEscrow = booking.payment_mode === 'escrow';
 
-  // Escrow: release the Stripe hold BEFORE opening the DB transaction — a
-  // Stripe network call must never happen while holding row locks.
+  // Cancel any outstanding hold/transaction BEFORE opening the DB transaction
+  // — a network call must never happen while holding row locks. See the
+  // matching comment in buyer/booking.service.js:cancelBooking for why
+  // escrow_payment_intent_id (legacy Stripe) is the realistic case here.
   if (wasHeld && isEscrow) {
-    await escrow.cancelHold(booking);
+    if (booking.escrow_payment_intent_id) {
+      await stripeHelper.cancelPaymentIntent(booking.escrow_payment_intent_id).catch((err) => {
+        console.error('seller.booking.cancelBooking legacy hold cancel:', err && err.message);
+      });
+    } else if (booking.escrow_transaction_id) {
+      await escrow.cancelBookingTransaction(booking);
+    }
   }
 
   await sequelize.transaction(async (t) => {

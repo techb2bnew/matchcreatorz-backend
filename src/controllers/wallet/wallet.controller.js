@@ -6,6 +6,7 @@ const topup      = require('../../services/wallet/topup.service');
 const withdraw   = require('../../services/wallet/withdrawal.service');
 const connectsPurchase = require('../../services/seller/connectsPurchase.service');
 const escrow     = require('../../services/shared/escrow.service');
+const escrowComHelper = require('../../helpers/escrowCom.helper');
 const notify     = require('../../helpers/notification.helper');
 const stripe     = require('../../helpers/stripe.helper');
 const response   = require('../../helpers/response.helper');
@@ -389,10 +390,12 @@ exports.webhook = async (req, res) => {
       if (session.metadata?.kind === 'connects_purchase') {
         await connectsPurchase.creditFromSession(session);
       } else if (session.metadata?.kind === 'escrow_hold') {
+        // Legacy only — new bookings never create this kind (see escrow.service.js).
         const full = await stripe.getCheckoutSessionWithIntent(session.id);
-        await escrow.confirmHold(full);
+        await escrow.confirmLegacyStripeHold(full);
       } else if (session.metadata?.kind === 'escrow_milestone_charge') {
-        await escrow.confirmMilestoneCharge(session);
+        // Legacy only — new milestones never create this kind.
+        await escrow.confirmLegacyStripeMilestoneCharge(session);
       } else {
         await topup.creditFromSession(session);
       }
@@ -420,6 +423,38 @@ exports.webhook = async (req, res) => {
     }
   } catch (err) {
     console.error('Stripe webhook handler error:', err && err.message);
+  }
+  return res.json({ received: true });
+};
+
+// ── Escrow.com webhook (ordinary JSON body; mounted in app.js after
+// express.json) ──────────────────────────────────────────────────────────
+// PROVISIONAL — Escrow.com's docs show `{ event_type: 'transaction', event:
+// '...', data: {} }` but don't fully spell out the `data` shape; this reads
+// booking_id/milestone_id back out of the transaction's own metadata (set at
+// creation time in escrow.service.js) via a GET rather than trusting the
+// webhook body directly, since Escrow.com documents no signature/secret
+// verification for these calls.
+exports.escrowComWebhook = async (req, res) => {
+  try {
+    const event = req.body || {};
+    const relevant = ['payment_approved', 'payment_received', 'agree', 'accept', 'complete'];
+    if (relevant.includes(event.event)) {
+      const transactionId = event.data?.transaction_id || event.data?.id || event.transaction_id;
+      if (transactionId) {
+        const txn = await escrowComHelper.getTransaction(transactionId).catch(() => null);
+        const kind       = txn?.metadata?.kind;
+        const bookingId  = Number(txn?.metadata?.booking_id);
+        const milestoneId = Number(txn?.metadata?.milestone_id);
+        if (kind === 'booking' && bookingId) {
+          await escrow.confirmBookingPayment(bookingId);
+        } else if (kind === 'milestone' && bookingId && milestoneId) {
+          await escrow.confirmMilestonePayment(bookingId, milestoneId);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Escrow.com webhook handler error:', err && err.message);
   }
   return res.json({ received: true });
 };

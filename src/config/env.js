@@ -68,6 +68,13 @@ const env = {
   STRIPE_PUBLISHABLE_KEY: process.env.STRIPE_PUBLISHABLE_KEY || '',
   STRIPE_WEBHOOK_SECRET:  process.env.STRIPE_WEBHOOK_SECRET  || '',
 
+  // Escrow.com (Escrow Pay — buyer/seller booking escrow, milestone payments)
+  ESCROW_COM_EMAIL:        process.env.ESCROW_COM_EMAIL        || '',
+  ESCROW_COM_API_KEY:      process.env.ESCROW_COM_API_KEY      || '',
+  ESCROW_COM_ENV:          (process.env.ESCROW_COM_ENV || 'sandbox').toLowerCase(), // 'sandbox' | 'production'
+  ESCROW_COM_BROKER_EMAIL: process.env.ESCROW_COM_BROKER_EMAIL || '', // MatchCreatorz's own Escrow.com account — receives the broker_fee (platform fee) on every transaction
+  ESCROW_COM_CURRENCY:     (process.env.ESCROW_COM_CURRENCY || 'usd').toLowerCase(), // Escrow.com only supports usd/aud/eur/gbp/cad
+
   // Wallet business rules
   PLATFORM_FEE_PERCENT: parseFloat(process.env.PLATFORM_FEE_PERCENT || '10'), // % taken by platform on completed bookings
   MIN_WITHDRAW:         parseFloat(process.env.MIN_WITHDRAW || '50'),         // minimum seller withdrawal

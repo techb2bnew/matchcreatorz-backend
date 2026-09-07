@@ -94,10 +94,10 @@ exports.createBooking = async (req, res, next) => {
  *   patch:
  *     summary: Accept completed work (amidst_completion -> completed)
  *     description: |
- *       If the booking is in escrow mode, this captures the Stripe hold (real charge) instead of
- *       debiting the wallet. Returns 400 "Please complete the escrow payment for this booking first"
- *       if the buyer never completed the initial hold checkout — on that error, call
- *       `POST .../escrow/checkout` and redirect the buyer to pay before retrying.
+ *       If the booking is in escrow mode, this does NOT settle immediately — it creates an
+ *       Escrow.com pay transaction for the full amount and returns
+ *       `{ escrow: true, checkout_url, session_id }` so the client can redirect the buyer to pay.
+ *       Settlement happens once Escrow.com confirms funds (webhook or `GET .../escrow/confirm`).
  *     tags: [Buyer - Bookings]
  *     security: [{ bearerAuth: [] }]
  *     parameters:
@@ -107,15 +107,15 @@ exports.createBooking = async (req, res, next) => {
  *         schema: { type: integer }
  *     responses:
  *       200:
- *         description: Booking completed
+ *         description: Booking completed (wallet mode), OR an Escrow.com pay transaction to complete (escrow mode)
  *       400:
- *         description: Booking is not awaiting acceptance, OR (escrow mode) the escrow payment hasn't been completed yet
+ *         description: Booking is not awaiting acceptance
  */
 /**
  * @swagger
  * /api/v1/buyer/bookings/{id}/escrow/checkout:
  *   post:
- *     summary: (Re)create a Stripe Checkout session for an escrow-mode booking's hold
+ *     summary: (Re)create an Escrow.com pay transaction for an escrow-mode booking
  *     tags: [Buyer - Bookings]
  *     security: [{ bearerAuth: [] }]
  *     parameters:
@@ -139,7 +139,7 @@ exports.createEscrowCheckout = async (req, res, next) => {
  * @swagger
  * /api/v1/buyer/bookings/{id}/escrow/confirm:
  *   get:
- *     summary: Confirm an escrow checkout session by id (return-page fallback if the webhook is slow)
+ *     summary: Confirm an escrow pay transaction (return-page fallback if the webhook is slow)
  *     tags: [Buyer - Bookings]
  *     security: [{ bearerAuth: [] }]
  *     parameters:
@@ -149,8 +149,9 @@ exports.createEscrowCheckout = async (req, res, next) => {
  *         schema: { type: integer }
  *       - in: query
  *         name: session_id
- *         required: true
+ *         required: false
  *         schema: { type: string }
+ *         description: Kept for contract compatibility — the transaction id is read from the booking row, not this param.
  *     responses:
  *       200: { description: "{ confirmed }" }
  */
@@ -385,8 +386,8 @@ exports.createMilestones = async (req, res, next) => {
  *       Once every milestone on a booking is accepted, the booking itself is marked completed automatically.
  *       If the booking is in escrow mode, this does NOT settle immediately — it instead returns
  *       `{ escrow: true, checkout_url, session_id }` so the client can redirect the buyer to pay for
- *       this specific milestone via Stripe Checkout. The milestone is only marked paid once that
- *       checkout completes (webhook or `GET .../escrow/confirm`).
+ *       this specific milestone via an Escrow.com pay transaction. The milestone is only marked paid
+ *       once that transaction is funded (webhook or `GET .../escrow/confirm`).
  *     tags: [Buyer - Bookings]
  *     security: [{ bearerAuth: [] }]
  *     parameters:
@@ -420,6 +421,32 @@ exports.acceptMilestone = async (req, res, next) => {
   try {
     const data = await svc.acceptMilestone(req.user.id, req.params.id, req.params.milestoneId);
     return response.success(res, 'Milestone accepted', data);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
+ * /api/v1/buyer/bookings/{id}/milestones/{milestoneId}/escrow/confirm:
+ *   get:
+ *     summary: Confirm a milestone's escrow pay transaction (return-page fallback if the webhook is slow)
+ *     tags: [Buyer - Bookings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *       - in: path
+ *         name: milestoneId
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: "{ confirmed }" }
+ */
+exports.confirmMilestoneCheckout = async (req, res, next) => {
+  try {
+    const data = await svc.confirmMilestoneCheckout(req.user.id, req.params.id, req.params.milestoneId);
+    return response.success(res, 'Checkout confirmed', data);
   } catch (err) { next(err); }
 };
 

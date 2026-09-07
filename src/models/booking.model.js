@@ -110,8 +110,18 @@ const Booking = sequelize.define('Booking', {
   },
 
   // Stripe PaymentIntent backing the whole-booking manual-capture hold
-  // (escrow mode, non-milestone bookings only).
+  // (escrow mode, non-milestone bookings only). Legacy — kept for bookings
+  // created before the Escrow.com migration; new bookings use
+  // escrow_transaction_id instead.
   escrow_payment_intent_id: {
+    type:      DataTypes.STRING,
+    allowNull: true,
+  },
+
+  // Escrow.com transaction id for this booking's whole-amount pay transaction
+  // (escrow mode, non-milestone bookings only — created lazily at Accept Work
+  // time, not at bid-accept). See services/shared/escrow.service.js.
+  escrow_transaction_id: {
     type:      DataTypes.STRING,
     allowNull: true,
   },

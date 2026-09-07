@@ -52,9 +52,15 @@ const BookingMilestone = sequelize.define('BookingMilestone', {
   attachments: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
 
   // Stripe PaymentIntent for THIS milestone's own charge (escrow mode only —
-  // inherits payment_mode from the parent Booking). Created lazily at the
-  // moment this milestone is accepted/paid, mirroring the wallet-mode timing.
+  // inherits payment_mode from the parent Booking). Legacy — kept for
+  // milestones created before the Escrow.com migration; new milestones use
+  // escrow_transaction_id instead.
   escrow_payment_intent_id: { type: DataTypes.STRING, allowNull: true },
+
+  // Escrow.com transaction id for THIS milestone's own pay transaction —
+  // created lazily the moment this milestone is accepted/paid, same timing
+  // as the Stripe flow it replaces.
+  escrow_transaction_id: { type: DataTypes.STRING, allowNull: true },
 
   notes:           { type: DataTypes.TEXT, allowNull: true }, // seller's submission note
   dispute_reason:  { type: DataTypes.TEXT, allowNull: true }, // buyer's rejection reason

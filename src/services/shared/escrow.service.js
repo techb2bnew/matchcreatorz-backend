@@ -1,10 +1,22 @@
 'use strict';
-// The single place all Stripe-calling escrow logic lives — mirrors how
+// The single place all Escrow.com-calling logic lives — mirrors how
 // settleWorkEntry/settleMilestone centralize wallet-settlement logic.
-const { sequelize, AppSetting, Booking, BookingMilestone, User, WalletTransaction } = require('../../models');
-const stripeHelper = require('../../helpers/stripe.helper');
-const env          = require('../../config/env');
-const { settleMilestone } = require('./milestone.service');
+//
+// NOTE: the "funded"/"released" status checks below and releaseTransaction()
+// in escrowCom.helper.js are provisional — Escrow.com's docs don't fully spell
+// out the transaction/item status enum or exactly which ship/receive/accept
+// calls are required before funds actually move to the seller. This needs one
+// round of verification against a real sandbox transaction before go-live
+// (see the plan's "open items"); the code is written so only the small
+// TRANSACTION_FUNDED_STATUSES / releaseTransaction internals need adjusting,
+// not the surrounding settlement flow.
+const { sequelize, AppSetting, Booking, BookingMilestone, User, Job, WalletTransaction } = require('../../models');
+const escrowComHelper = require('../../helpers/escrowCom.helper');
+const stripeHelper    = require('../../helpers/stripe.helper');
+const env             = require('../../config/env');
+const wallet          = require('../wallet/wallet.service');
+const notify          = require('../../helpers/notification.helper');
+const { settleMilestone, platformAdminId } = require('./milestone.service');
 
 // ── Enabled flag — short in-process cache so a booking-creation request
 // doesn't need a DB round-trip on the hot path. ──────────────────────────
@@ -21,46 +33,180 @@ const isEscrowEnabled = async () => {
 };
 
 // A fixed-price/milestone booking gets escrow mode when the toggle is on AND
-// Stripe is configured. Hourly bookings always stay wallet-mode — there's no
-// upfront total to hold/charge.
+// Escrow.com is configured. Hourly bookings always stay wallet-mode — there's
+// no upfront total to escrow.
 const resolvePaymentMode = async (jobType) => {
   if (jobType === 'hourly') return 'wallet';
   const enabled = await isEscrowEnabled();
-  return enabled && stripeHelper.isEnabled() ? 'escrow' : 'wallet';
+  return enabled && escrowComHelper.isEnabled() ? 'escrow' : 'wallet';
 };
 
-const buyerEmailFor = async (buyerId) => {
-  const buyer = await User.findByPk(buyerId, { attributes: ['email'] });
-  return buyer ? buyer.email : null;
+const emailFor = async (userId) => {
+  const user = await User.findByPk(userId, { attributes: ['email'] });
+  return user ? user.email : null;
 };
 
-// ── Whole-booking hold (manual capture) ─────────────────────────────────
-const createHoldCheckout = async (booking, { successUrl, cancelUrl } = {}) => {
-  if (!stripeHelper.isEnabled()) throw Object.assign(new Error('Payments are not configured'), { statusCode: 500 });
-  const email = await buyerEmailFor(booking.buyer_id);
-  return stripeHelper.createEscrowHoldCheckout({
-    amount: Number(booking.amount),
-    booking: { id: booking.id, title: booking.title, buyerEmail: email },
-    successUrl: successUrl || `${env.CLIENT_URL}/buyer/bookings/${booking.id}?escrow=success&session_id={CHECKOUT_SESSION_ID}`,
-    cancelUrl:  cancelUrl  || `${env.CLIENT_URL}/buyer/bookings/${booking.id}?escrow=cancel`,
+// Provisional — confirm the real values against a sandbox transaction payload.
+const TRANSACTION_FUNDED_STATUSES = ['funded', 'agreed_and_funded', 'payment_received'];
+
+const isFunded = (txn) => TRANSACTION_FUNDED_STATUSES.includes(txn && txn.status);
+
+// ── Whole-booking pay transaction — created lazily at Accept Work time, NOT
+// at bid-accept. Mirrors createMilestonePayTransaction below. ───────────────
+const createBookingPayTransaction = async (booking) => {
+  if (!escrowComHelper.isEnabled()) throw Object.assign(new Error('Payments are not configured'), { statusCode: 500 });
+  const [buyerEmail, sellerEmail] = await Promise.all([emailFor(booking.buyer_id), emailFor(booking.seller_id)]);
+
+  const txn = await escrowComHelper.createPayTransaction({
+    amount:          Number(booking.amount),
+    title:           booking.title,
+    buyerEmail, sellerEmail,
+    brokerFeeAmount: Number(booking.platform_fee),
+    // No session/transaction id templating (Escrow.com has no Stripe-style
+    // {CHECKOUT_SESSION_ID} placeholder) — the confirm step below looks the
+    // transaction up from the booking row instead of trusting a query param.
+    returnUrl:       `${env.CLIENT_URL}/buyer/bookings/${booking.id}?escrow=success`,
+    metadata:        { kind: 'booking', booking_id: String(booking.id) },
+  });
+
+  await booking.update({ escrow_transaction_id: txn.transaction_id });
+  return { checkout_url: txn.landing_page, session_id: txn.transaction_id };
+};
+
+// ── Per-milestone pay transaction — created lazily when the milestone is
+// accepted (buyer approves the submitted/countered amount). ─────────────────
+const createMilestonePayTransaction = async (booking, milestone, { amount } = {}) => {
+  if (!escrowComHelper.isEnabled()) throw Object.assign(new Error('Payments are not configured'), { statusCode: 500 });
+  const [buyerEmail, sellerEmail] = await Promise.all([emailFor(booking.buyer_id), emailFor(booking.seller_id)]);
+
+  // Milestone broker fee mirrors the booking's overall fee rate.
+  const feeRate  = booking.amount > 0 ? Number(booking.platform_fee) / Number(booking.amount) : 0;
+  const feeShare = wallet.round2(amount * feeRate);
+
+  const txn = await escrowComHelper.createPayTransaction({
+    amount,
+    title:           `${booking.title} — ${milestone.title}`,
+    buyerEmail, sellerEmail,
+    brokerFeeAmount: feeShare,
+    // milestone_id in the return URL lets the frontend confirm against the
+    // milestone-specific endpoint instead of the whole-booking one.
+    returnUrl:       `${env.CLIENT_URL}/buyer/bookings/${booking.id}?escrow=success&milestone_id=${milestone.id}`,
+    metadata:        { kind: 'milestone', booking_id: String(booking.id), milestone_id: String(milestone.id) },
+  });
+
+  await milestone.update({ escrow_transaction_id: txn.transaction_id });
+  return { checkout_url: txn.landing_page, session_id: txn.transaction_id };
+};
+
+// ── Confirm + settle the whole-booking transaction (webhook OR
+// return-fallback) — idempotent. ─────────────────────────────────────────────
+const confirmBookingPayment = async (bookingId) => {
+  const preBooking = await Booking.findByPk(bookingId);
+  if (!preBooking || !preBooking.escrow_transaction_id) return { confirmed: false, reason: 'no_transaction' };
+  if (preBooking.payment_status === 'released') return { confirmed: false, reason: 'already_processed' };
+
+  const txn = await escrowComHelper.getTransaction(preBooking.escrow_transaction_id);
+  if (!isFunded(txn)) return { confirmed: false, reason: 'not_yet_funded' };
+
+  // Our own app already established buyer approval before this transaction
+  // was ever created (see acceptWork's diversion) — so funded == approved-
+  // and-payable from our workflow's perspective. Best-effort drive the
+  // transaction to release; if Escrow.com requires an explicit
+  // ship/receive/accept sequence first, that happens inside releaseTransaction.
+  await escrowComHelper.releaseTransaction(preBooking.escrow_transaction_id).catch((err) => {
+    console.error('escrow.confirmBookingPayment releaseTransaction:', err && err.message);
+  });
+
+  const result = await sequelize.transaction(async (t) => {
+    const booking = await Booking.findOne({ where: { id: bookingId }, lock: t.LOCK.UPDATE, transaction: t });
+    if (!booking || booking.payment_status === 'released') return { confirmed: false, reason: 'already_processed' };
+
+    const amount  = Number(booking.amount);
+    const fee     = Number(booking.platform_fee);
+    const earning = wallet.round2(amount - fee);
+    const adminId = await platformAdminId();
+
+    await booking.update({ status: 'completed', payment_status: 'released' }, { transaction: t });
+    await wallet.credit(booking.seller_id, earning, {
+      type: 'earning', booking_id: booking.id, note: `Earning from booking #${booking.id} — ${booking.title}`,
+    }, t);
+    if (adminId && fee > 0) {
+      await wallet.credit(adminId, fee, {
+        type: 'platform_fee', booking_id: booking.id, note: `Platform fee from booking #${booking.id}`,
+      }, t);
+    }
+    if (booking.job_id) {
+      await Job.update({ status: 'COMPLETED' }, { where: { id: booking.job_id }, transaction: t });
+    }
+    return { confirmed: true, bookingId };
+  });
+
+  if (result.confirmed) {
+    const seller = await User.findByPk(preBooking.seller_id, {
+      attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'],
+    });
+    if (seller) notify.workAccepted(seller, preBooking);
+  }
+  return result;
+};
+
+// ── Confirm + settle a milestone transaction (webhook OR return-fallback) —
+// idempotent. Reuses settleMilestone (same one wallet-mode acceptMilestone
+// uses) — its `wasHeld` gate already skips the wallet.debit(buyer) once
+// payment_status is marked 'held' below, since Escrow.com already collected
+// real money for this milestone. ─────────────────────────────────────────────
+const confirmMilestonePayment = async (bookingId, milestoneId) => {
+  const milestone = await BookingMilestone.findOne({ where: { id: milestoneId, booking_id: bookingId } });
+  if (!milestone || !milestone.escrow_transaction_id) return { confirmed: false, reason: 'no_transaction' };
+  if (!['submitted', 'countered'].includes(milestone.status)) return { confirmed: false, reason: 'already_processed' };
+
+  const txn = await escrowComHelper.getTransaction(milestone.escrow_transaction_id);
+  if (!isFunded(txn)) return { confirmed: false, reason: 'not_yet_funded' };
+
+  await escrowComHelper.releaseTransaction(milestone.escrow_transaction_id).catch((err) => {
+    console.error('escrow.confirmMilestonePayment releaseTransaction:', err && err.message);
+  });
+
+  return sequelize.transaction(async (t) => {
+    const booking = await Booking.findOne({ where: { id: bookingId }, lock: t.LOCK.UPDATE, transaction: t });
+    const ms      = await BookingMilestone.findOne({
+      where: { id: milestoneId, booking_id: bookingId }, lock: t.LOCK.UPDATE, transaction: t,
+    });
+    if (!booking || !ms) return { confirmed: false, reason: 'not_found' };
+    if (!['submitted', 'countered'].includes(ms.status)) return { confirmed: false, reason: 'already_processed' };
+
+    const amount = Number(ms.status === 'countered' && ms.counter_by === 'seller' ? ms.counter_amount : ms.amount);
+    await ms.update({ payment_status: 'held' }, { transaction: t });
+    return { confirmed: true, bookingId, milestoneId, milestone: await settleMilestone(booking, ms, { amount, t }) };
   });
 };
 
-// ── Per-milestone charge (normal auto-capture — this IS the charge) ──────
-const createMilestoneChargeCheckout = async (booking, milestone, { amount, successUrl, cancelUrl } = {}) => {
-  if (!stripeHelper.isEnabled()) throw Object.assign(new Error('Payments are not configured'), { statusCode: 500 });
-  const email = await buyerEmailFor(booking.buyer_id);
-  return stripeHelper.createMilestoneChargeCheckout({
-    amount: Number(amount),
-    booking: { id: booking.id, title: booking.title, buyerEmail: email },
-    milestone: { id: milestone.id, title: milestone.title },
-    successUrl: successUrl || `${env.CLIENT_URL}/buyer/bookings/${booking.id}?escrow=success&session_id={CHECKOUT_SESSION_ID}`,
-    cancelUrl:  cancelUrl  || `${env.CLIENT_URL}/buyer/bookings/${booking.id}?escrow=cancel`,
-  });
+// ── Cancel a not-yet-funded transaction — Escrow.com network call, always
+// invoked OUTSIDE any open DB transaction/row-lock. ──────────────────────────
+const cancelBookingTransaction = async (booking) => {
+  if (!booking.escrow_transaction_id) return;
+  try {
+    await escrowComHelper.cancelTransaction(booking.escrow_transaction_id);
+  } catch (err) {
+    console.error('escrow.cancelBookingTransaction:', err && err.message);
+  }
 };
 
-// ── Confirm the whole-booking hold (webhook OR return-fallback) — idempotent ──
-const confirmHold = async (session) => {
+const cancelMilestoneTransaction = async (milestone) => {
+  if (!milestone.escrow_transaction_id) return;
+  try {
+    await escrowComHelper.cancelTransaction(milestone.escrow_transaction_id);
+  } catch (err) {
+    console.error('escrow.cancelMilestoneTransaction:', err && err.message);
+  }
+};
+
+// ── Legacy Stripe confirm handlers ───────────────────────────────────────────
+// Bookings/milestones whose Stripe Checkout Session was already created
+// before the Escrow.com migration may still complete (and fire a Stripe
+// webhook) afterward — this keeps those settling correctly. New transactions
+// never reach these; see createBookingPayTransaction/createMilestonePayTransaction.
+const confirmLegacyStripeHold = async (session) => {
   if (!session) return { confirmed: false };
   const bookingId = Number(session.metadata?.booking_id);
   if (!bookingId) return { confirmed: false, reason: 'missing_metadata' };
@@ -70,8 +216,6 @@ const confirmHold = async (session) => {
   if (booking.payment_status === 'held' || booking.escrow_payment_intent_id)
     return { confirmed: false, reason: 'already_processed' };
 
-  // A manual-capture session's own session.payment_status does NOT read 'paid'
-  // at hold-time — check the expanded PaymentIntent's status instead.
   const full = await stripeHelper.getCheckoutSessionWithIntent(session.id);
   const pi = full.payment_intent;
   if (!pi || pi.status !== 'requires_capture') return { confirmed: false, reason: 'not_yet_authorized' };
@@ -80,15 +224,12 @@ const confirmHold = async (session) => {
   return { confirmed: true, bookingId };
 };
 
-// ── Confirm + settle a milestone charge (webhook OR return-fallback) — idempotent ──
-const confirmMilestoneCharge = async (session) => {
+const confirmLegacyStripeMilestoneCharge = async (session) => {
   if (!session || session.payment_status !== 'paid') return { confirmed: false };
   const bookingId   = Number(session.metadata?.booking_id);
   const milestoneId = Number(session.metadata?.milestone_id);
   if (!bookingId || !milestoneId) return { confirmed: false, reason: 'missing_metadata' };
 
-  // DB-level backstop (partial unique index on milestone_id+type) also guards
-  // this — this check just avoids a wasted transaction on a clean retry.
   const already = await WalletTransaction.findOne({ where: { milestone_id: milestoneId, type: 'earning' } });
   if (already) return { confirmed: false, reason: 'already_processed' };
 
@@ -102,9 +243,6 @@ const confirmMilestoneCharge = async (session) => {
       if (!['submitted', 'countered'].includes(milestone.status)) return { confirmed: false, reason: 'already_processed' };
 
       const amount = Number(session.metadata?.amount) || Number(milestone.amount);
-      // Mark held BEFORE settling — settleMilestone's existing `wasHeld` gate
-      // then correctly skips the wallet.debit(buyer), since Stripe already
-      // charged the card for this milestone.
       await milestone.update({
         payment_status: 'held',
         escrow_payment_intent_id: session.payment_intent,
@@ -118,33 +256,15 @@ const confirmMilestoneCharge = async (session) => {
   }
 };
 
-// ── Capture / cancel the whole-booking hold — Stripe network calls, always
-// invoked OUTSIDE any open DB transaction/row-lock. ───────────────────────
-const captureHold = async (booking) => {
-  if (!booking.escrow_payment_intent_id)
-    throw Object.assign(new Error('No escrow hold to capture for this booking'), { statusCode: 400 });
-  await stripeHelper.capturePaymentIntent(booking.escrow_payment_intent_id);
-  await booking.update({ escrow_captured_at: new Date() });
-};
-
-const cancelHold = async (booking) => {
-  if (!booking.escrow_payment_intent_id) return;
-  try {
-    await stripeHelper.cancelPaymentIntent(booking.escrow_payment_intent_id);
-  } catch (err) {
-    // Already captured/canceled on Stripe's side (e.g. auto-expired after 7
-    // days) — nothing more to do, the booking-side update still proceeds.
-    console.error('escrow.cancelHold:', err && err.message);
-  }
-};
-
 module.exports = {
   isEscrowEnabled,
   resolvePaymentMode,
-  createHoldCheckout,
-  createMilestoneChargeCheckout,
-  confirmHold,
-  confirmMilestoneCharge,
-  captureHold,
-  cancelHold,
+  createBookingPayTransaction,
+  createMilestonePayTransaction,
+  confirmBookingPayment,
+  confirmMilestonePayment,
+  cancelBookingTransaction,
+  cancelMilestoneTransaction,
+  confirmLegacyStripeHold,
+  confirmLegacyStripeMilestoneCharge,
 };

@@ -57,48 +57,10 @@ const getCheckoutSession = (sessionId) => client().checkout.sessions.retrieve(se
 const getCheckoutSessionWithIntent = (sessionId) =>
   client().checkout.sessions.retrieve(sessionId, { expand: ['payment_intent'] });
 
-// ── Escrow: whole-booking hold (manual capture) ───────────────────────────────
-const createEscrowHoldCheckout = async ({ amount, booking, successUrl, cancelUrl }) => {
-  const session = await client().checkout.sessions.create({
-    mode: 'payment',
-    payment_method_types: ['card'],
-    payment_intent_data: { capture_method: 'manual' },
-    customer_email: booking.buyerEmail || undefined,
-    line_items: [{
-      quantity: 1,
-      price_data: {
-        currency: env.WALLET_CURRENCY,
-        unit_amount: toCents(amount),
-        product_data: { name: `Escrow hold — ${booking.title}`, description: 'MatchCreatorz escrow payment (held until work is approved)' },
-      },
-    }],
-    metadata: { kind: 'escrow_hold', booking_id: String(booking.id) },
-    success_url: successUrl,
-    cancel_url:  cancelUrl,
-  });
-  return { id: session.id, url: session.url };
-};
-
-// ── Escrow: per-milestone charge (normal auto-capture — this IS the charge) ───
-const createMilestoneChargeCheckout = async ({ amount, booking, milestone, successUrl, cancelUrl }) => {
-  const session = await client().checkout.sessions.create({
-    mode: 'payment',
-    payment_method_types: ['card'],
-    customer_email: booking.buyerEmail || undefined,
-    line_items: [{
-      quantity: 1,
-      price_data: {
-        currency: env.WALLET_CURRENCY,
-        unit_amount: toCents(amount),
-        product_data: { name: `Milestone payment — ${milestone.title}`, description: `MatchCreatorz escrow milestone charge (${booking.title})` },
-      },
-    }],
-    metadata: { kind: 'escrow_milestone_charge', booking_id: String(booking.id), milestone_id: String(milestone.id) },
-    success_url: successUrl,
-    cancel_url:  cancelUrl,
-  });
-  return { id: session.id, url: session.url };
-};
+// Escrow (whole-booking hold / per-milestone charge) moved to Escrow.com —
+// see helpers/escrowCom.helper.js + services/shared/escrow.service.js.
+// capturePaymentIntent/cancelPaymentIntent below are kept only to settle
+// Stripe Checkout Sessions created before that migration.
 
 const capturePaymentIntent = (paymentIntentId) => client().paymentIntents.capture(paymentIntentId);
 const cancelPaymentIntent  = (paymentIntentId) => client().paymentIntents.cancel(paymentIntentId);
@@ -184,8 +146,6 @@ module.exports = {
   retrieveAccount,
   transferToConnected,
   constructEvent,
-  createEscrowHoldCheckout,
-  createMilestoneChargeCheckout,
   capturePaymentIntent,
   cancelPaymentIntent,
   publishableKey: env.STRIPE_PUBLISHABLE_KEY,
