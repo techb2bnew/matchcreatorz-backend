@@ -48,6 +48,23 @@ const BookingMilestone = sequelize.define('BookingMilestone', {
     defaultValue: 'unpaid',
   },
 
+  // Escrow mode only (ignored for wallet-mode bookings, which always settle
+  // straight to the wallet regardless of this field). Defaults to 'direct'
+  // but is really decided by the BUYER at Accept & Pay time (not at milestone
+  // creation) — see buyer/booking.service.js:acceptMilestone, which persists
+  // whichever the buyer picks the moment payment_status is still 'unpaid':
+  //   direct → a single real Stripe charge, released to the seller the moment
+  //            it's paid (today's original behavior).
+  //   hold   → places a manual-capture hold first (payment_status → 'held',
+  //            nothing released yet); a second Accept & Pay click captures it
+  //            and releases the payout — mirrors the whole-booking
+  //            Booking.payment_status hold/capture flow, just scoped to one stage.
+  payment_type: {
+    type:         DataTypes.ENUM('direct', 'hold'),
+    allowNull:    false,
+    defaultValue: 'direct',
+  },
+
   // Proof-of-work for this stage — array of { url, name, type, size }.
   attachments: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
 

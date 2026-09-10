@@ -37,10 +37,16 @@ const settleWorkEntry = async (booking, entry, { hours, t }) => {
   const earning  = wallet.round2(amount - fee);
   const adminId  = await platformAdminId();
 
-  await wallet.debit(booking.buyer_id, amount, {
-    type: 'booking_payment', booking_id: booking.id, work_entry_id: entry.id,
-    note: `Payment — ${hours} hrs on booking #${booking.id} (${entry.work_date})`,
-  }, t);
+  // `wasHeld` covers escrow-mode entries whose money was already collected by
+  // Stripe (a captured hold, or a direct charge) — don't double-charge those.
+  const wasHeld = entry.payment_status === 'held';
+
+  if (!wasHeld) {
+    await wallet.debit(booking.buyer_id, amount, {
+      type: 'booking_payment', booking_id: booking.id, work_entry_id: entry.id,
+      note: `Payment — ${hours} hrs on booking #${booking.id} (${entry.work_date})`,
+    }, t);
+  }
 
   await wallet.credit(booking.seller_id, earning, {
     type: 'earning', booking_id: booking.id, work_entry_id: entry.id,

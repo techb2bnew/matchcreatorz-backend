@@ -6,18 +6,9 @@ const wallet                          = require('../wallet/wallet.service');
 const { computeFee }                  = require('../../config/fee');
 const { settleWorkEntry }             = require('../shared/workEntry.service');
 const { settleMilestone, createMilestones: createMilestonesShared } = require('../shared/milestone.service');
+const { settleBooking }               = require('../shared/booking.service');
 const escrow                          = require('../shared/escrow.service');
 const stripeHelper                    = require('../../helpers/stripe.helper');
-
-// The platform's fee is parked in the primary admin's wallet so the admin wallet
-// reflects real platform revenue. Cached after first lookup.
-let _platformAdminId;
-const platformAdminId = async () => {
-  if (_platformAdminId !== undefined) return _platformAdminId;
-  const admin = await User.findOne({ where: { role: 'ADMIN' }, order: [['id', 'ASC']], attributes: ['id'] });
-  _platformAdminId = admin ? admin.id : null;
-  return _platformAdminId;
-};
 
 const INCLUDE = [
   { model: User,    as: 'buyer',   attributes: ['id', 'name'] },
@@ -78,8 +69,7 @@ exports.createBooking = async (buyerId, { service_id, job_id, notes }) => {
   const amount = Number(service.price);
   const fee    = computeFee(amount);
 
-  // Services are always 'fixed' (job_type default) — eligible for escrow.
-  const payment_mode = await escrow.resolvePaymentMode('fixed');
+  const payment_mode = await escrow.resolvePaymentMode();
 
   // No wallet charge here — payment is deferred until the seller actually
   // submits work (see submitWork). payment_status stays 'unpaid' until then.
@@ -130,7 +120,7 @@ exports.confirmEscrowCheckout = async (buyerId, id, sessionId) => {
   return escrow.confirmHold(session);
 };
 
-exports.acceptWork = async (buyerId, id) => {
+exports.acceptWork = async (buyerId, id, paymentType) => {
   const booking = await Booking.findOne({ where: { id, buyer_id: buyerId } });
   if (!booking) throw Object.assign(new Error('Booking not found'), { status: 404 });
   if (booking.status !== 'amidst_completion')
@@ -140,55 +130,40 @@ exports.acceptWork = async (buyerId, id) => {
   if (milestoneCount > 0)
     throw Object.assign(new Error('This booking uses milestones — accept each milestone individually'), { status: 400 });
 
-  // Escrow bookings must have a confirmed hold before work can be accepted —
-  // never silently fall back to a wallet charge for these.
-  if (booking.payment_mode === 'escrow' && booking.payment_status !== 'held')
-    throw Object.assign(new Error('Please complete the escrow payment for this booking first'), { status: 400 });
+  if (booking.payment_mode === 'escrow') {
+    // First click (nothing paid or held yet) — the buyer picks how to pay
+    // right now, not back when the booking was created. Whatever they choose
+    // is persisted, since a 'hold' choice needs a second click later to
+    // capture + release it.
+    if (booking.payment_status === 'unpaid') {
+      const type = paymentType === 'hold' ? 'hold' : 'direct';
+      if (booking.payment_type !== type) await booking.update({ payment_type: type });
 
-  // Charge the buyer right now, then immediately release to the seller — both
-  // in one transaction so a failed charge (insufficient balance) rolls back
-  // cleanly and the buyer can just try Accept again after adding funds.
-  // `wasHeld` covers legacy bookings from before this flow existed, where the
-  // full amount was already collected up front — don't charge those again.
-  const amount  = Number(booking.amount);
-  const fee     = Number(booking.platform_fee);
-  const earning = wallet.round2(amount - fee);
-  const adminId = await platformAdminId();
-  const wasHeld = booking.payment_status === 'held';
+      if (type === 'hold') {
+        const session = await escrow.createHoldCheckout(booking);
+        return { escrow: true, checkout_url: session.url, session_id: session.id };
+      }
+      // 'direct' — a single real charge, released the moment it's paid.
+      const session = await escrow.createBookingChargeCheckout(booking);
+      return { escrow: true, checkout_url: session.url, session_id: session.id };
+    }
 
-  // Escrow: capture the Stripe hold BEFORE opening the DB transaction — a
-  // Stripe network call must never happen while holding row locks.
-  if (wasHeld && booking.payment_mode === 'escrow') {
-    await escrow.captureHold(booking);
+    if (booking.payment_type === 'hold' && booking.payment_status === 'held') {
+      // Second click, mirrors the milestone flow: the hold from the first
+      // click is confirmed — capture it now and release the payout. Capture
+      // BEFORE opening any DB transaction (a Stripe network call must never
+      // happen while holding a row lock).
+      await escrow.captureHold(booking);
+      return sequelize.transaction((t) => settleBooking(booking, { t }));
+    }
+
+    // A 'direct' charge is still awaiting Stripe confirmation (webhook or
+    // return-page) — nothing more for this endpoint to do until then.
+    throw Object.assign(new Error('Payment for this booking is already in progress'), { status: 400 });
   }
 
-  await sequelize.transaction(async (t) => {
-    if (!wasHeld) {
-      await wallet.debit(buyerId, amount, {
-        type: 'booking_payment', booking_id: booking.id,
-        note: `Payment for booking #${booking.id} — ${booking.title}`,
-      }, t);
-    }
-    await booking.update({ status: 'completed', payment_status: 'released' }, { transaction: t });
-    await wallet.credit(booking.seller_id, earning, {
-      type: 'earning', booking_id: booking.id,
-      note: `Earning from booking #${booking.id} — ${booking.title}`,
-    }, t);
-    if (adminId && fee > 0) {
-      await wallet.credit(adminId, fee, {
-        type: 'platform_fee', booking_id: booking.id,
-        note: `Platform fee from booking #${booking.id}`,
-      }, t);
-    }
-    if (booking.job_id) {
-      await Job.update({ status: 'COMPLETED' }, { where: { id: booking.job_id }, transaction: t });
-    }
-  });
-
-  // Notify seller work was accepted
-  const seller = await User.findByPk(booking.seller_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
-  if (seller) notify.workAccepted(seller, booking);
-  return booking;
+  // Wallet mode — unchanged behavior, now via the shared settle function.
+  return sequelize.transaction((t) => settleBooking(booking, { t }));
 };
 
 exports.rejectWork = async (buyerId, id, dispute_reason) => {
@@ -209,7 +184,66 @@ exports.rejectWork = async (buyerId, id, dispute_reason) => {
 };
 
 // ── Hourly work entries ──────────────────────────────────────────────────
-exports.approveWorkEntry = async (buyerId, id, entryId) => {
+exports.approveWorkEntry = async (buyerId, id, entryId, paymentType) => {
+  // Escrow diversion: a read-only pre-check outside any lock/transaction — a
+  // Stripe network call must never happen while holding a DB row lock. Wallet
+  // mode is completely untouched below (this block only runs when escrow).
+  const preBooking = await Booking.findOne({ where: { id, buyer_id: buyerId } });
+  if (preBooking && preBooking.payment_mode === 'escrow') {
+    const entry = await BookingWorkEntry.findOne({ where: { id: entryId, booking_id: preBooking.id } });
+    if (!entry) throw Object.assign(new Error('Work entry not found'), { status: 404 });
+
+    let settleHours;
+    if (entry.status === 'pending') settleHours = Number(entry.hours);
+    else if (entry.status === 'countered' && entry.counter_by === 'seller') settleHours = Number(entry.counter_hours);
+    else throw Object.assign(new Error(`Entry is already ${entry.status}`), { status: 400 });
+
+    const amount = wallet.round2(settleHours * Number(entry.rate));
+
+    // First click (nothing paid or held yet) — the buyer picks how to pay
+    // right now, mirroring acceptMilestone.
+    if (entry.payment_status === 'unpaid') {
+      const type = paymentType === 'hold' ? 'hold' : 'direct';
+      if (entry.payment_type !== type) await entry.update({ payment_type: type });
+
+      if (type === 'hold') {
+        const session = await escrow.createWorkEntryHoldCheckout(preBooking, entry, { amount });
+        return { escrow: true, checkout_url: session.url, session_id: session.id };
+      }
+      const session = await escrow.createWorkEntryChargeCheckout(preBooking, entry, { amount });
+      return { escrow: true, checkout_url: session.url, session_id: session.id };
+    }
+
+    if (entry.payment_type === 'hold' && entry.payment_status === 'held') {
+      // Second click: the hold from the first click is confirmed — capture it
+      // now and release the payout. Capture BEFORE opening any DB transaction.
+      await escrow.captureWorkEntryHold(entry);
+
+      try {
+        return await sequelize.transaction(async (t) => {
+          const booking = await Booking.findOne({ where: { id, buyer_id: buyerId }, lock: t.LOCK.UPDATE, transaction: t });
+          if (!booking) throw Object.assign(new Error('Booking not found'), { status: 404 });
+          const lockedEntry = await BookingWorkEntry.findOne({
+            where: { id: entryId, booking_id: booking.id }, lock: t.LOCK.UPDATE, transaction: t,
+          });
+          if (!lockedEntry) throw Object.assign(new Error('Work entry not found'), { status: 404 });
+          if (!['pending', 'countered'].includes(lockedEntry.status))
+            throw Object.assign(new Error(`Entry is already ${lockedEntry.status}`), { status: 400 });
+
+          return settleWorkEntry(booking, lockedEntry, { hours: settleHours, t });
+        });
+      } catch (err) {
+        if (err.name === 'SequelizeUniqueConstraintError')
+          throw Object.assign(new Error('This entry was already processed'), { status: 409 });
+        throw err;
+      }
+    }
+
+    // A 'direct' charge is still awaiting Stripe confirmation (webhook) —
+    // nothing more for this endpoint to do until then.
+    throw Object.assign(new Error('Payment for this entry is already in progress'), { status: 400 });
+  }
+
   try {
     return await sequelize.transaction(async (t) => {
       const booking = await Booking.findOne({
@@ -314,7 +348,7 @@ exports.createMilestones = async (buyerId, id, milestones) => {
   return createMilestonesShared(booking, milestones, 'buyer');
 };
 
-exports.acceptMilestone = async (buyerId, id, milestoneId) => {
+exports.acceptMilestone = async (buyerId, id, milestoneId, paymentType) => {
   // Escrow diversion: a read-only pre-check outside any lock/transaction — a
   // Stripe network call must never happen while holding a DB row lock. Wallet
   // mode is completely untouched below (this block only runs when escrow).
@@ -328,8 +362,55 @@ exports.acceptMilestone = async (buyerId, id, milestoneId) => {
     else if (milestone.status === 'countered' && milestone.counter_by === 'seller') settleAmount = Number(milestone.counter_amount);
     else throw Object.assign(new Error(`Milestone is already ${milestone.status}`), { status: 400 });
 
-    const session = await escrow.createMilestoneChargeCheckout(preBooking, milestone, { amount: settleAmount });
-    return { escrow: true, checkout_url: session.url, session_id: session.id };
+    // First click (nothing paid or held yet) — the buyer picks how to pay
+    // right now, not back when the milestone was set up. Whatever they pick
+    // is persisted, since a 'hold' choice needs a second click later to
+    // capture + release it.
+    if (milestone.payment_status === 'unpaid') {
+      const type = paymentType === 'hold' ? 'hold' : 'direct';
+      if (milestone.payment_type !== type) await milestone.update({ payment_type: type });
+
+      if (type === 'hold') {
+        const session = await escrow.createMilestoneHoldCheckout(preBooking, milestone, { amount: settleAmount });
+        return { escrow: true, checkout_url: session.url, session_id: session.id };
+      }
+      // 'direct' — a single real charge, released the moment it's paid.
+      const session = await escrow.createMilestoneChargeCheckout(preBooking, milestone, { amount: settleAmount });
+      return { escrow: true, checkout_url: session.url, session_id: session.id };
+    }
+
+    if (milestone.payment_type === 'hold' && milestone.payment_status === 'held') {
+      // Second click, mirrors the whole-booking acceptWork flow: the hold
+      // from the first click is confirmed — capture it now and release the
+      // payout. Capture BEFORE opening any DB transaction (a Stripe network
+      // call must never happen while holding a row lock).
+      await escrow.captureMilestoneHold(milestone);
+
+      try {
+        return await sequelize.transaction(async (t) => {
+          const booking = await Booking.findOne({
+            where: { id, buyer_id: buyerId }, lock: t.LOCK.UPDATE, transaction: t,
+          });
+          if (!booking) throw Object.assign(new Error('Booking not found'), { status: 404 });
+          const lockedMilestone = await BookingMilestone.findOne({
+            where: { id: milestoneId, booking_id: booking.id }, lock: t.LOCK.UPDATE, transaction: t,
+          });
+          if (!lockedMilestone) throw Object.assign(new Error('Milestone not found'), { status: 404 });
+          if (!['submitted', 'countered'].includes(lockedMilestone.status))
+            throw Object.assign(new Error(`Milestone is already ${lockedMilestone.status}`), { status: 400 });
+
+          return settleMilestone(booking, lockedMilestone, { amount: settleAmount, t });
+        });
+      } catch (err) {
+        if (err.name === 'SequelizeUniqueConstraintError')
+          throw Object.assign(new Error('This milestone was already processed'), { status: 409 });
+        throw err;
+      }
+    }
+
+    // A 'direct' charge is still awaiting Stripe confirmation (webhook or
+    // return-page) — nothing more for this endpoint to do until then.
+    throw Object.assign(new Error('Payment for this milestone is already in progress'), { status: 400 });
   }
 
   try {
@@ -400,7 +481,18 @@ exports.rejectMilestone = async (buyerId, id, milestoneId, dispute_reason) => {
   if (!['submitted', 'countered'].includes(milestone.status))
     throw Object.assign(new Error('Milestone is not awaiting acceptance'), { status: 400 });
 
-  await milestone.update({ status: 'rejected', dispute_reason: dispute_reason || null });
+  // The buyer can reject after already placing a 'hold' (changed their mind
+  // before the second, capturing click) — release that hold now rather than
+  // leaving it to sit on their card until Stripe auto-expires it in 7 days.
+  const hadActiveHold = milestone.payment_type === 'hold' && milestone.payment_status === 'held';
+  if (hadActiveHold) await escrow.cancelMilestoneHold(milestone);
+
+  await milestone.update({
+    status: 'rejected',
+    dispute_reason: dispute_reason || null,
+    payment_status: hadActiveHold ? 'unpaid' : milestone.payment_status,
+    escrow_payment_intent_id: hadActiveHold ? null : milestone.escrow_payment_intent_id,
+  });
 
   const [seller, buyer] = await Promise.all([
     User.findByPk(booking.seller_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] }),

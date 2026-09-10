@@ -106,6 +106,10 @@ const createMilestones = async (booking, milestones, actorRole) => {
   if (!Array.isArray(milestones) || milestones.length < 1)
     throw Object.assign(new Error('Provide at least 1 milestone'), { status: 400 });
 
+  // payment_type (direct vs. hold) is NOT decided here — the buyer picks it
+  // at Accept & Pay time instead (see buyer/booking.service.js:acceptMilestone).
+  // It starts at the model default ('direct') and is overwritten the moment
+  // the buyer actually chooses.
   const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
   const clean = milestones.map((m, i) => ({
     title: String(m.title || '').trim() || `Milestone ${i + 1}`,

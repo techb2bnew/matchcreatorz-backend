@@ -163,7 +163,7 @@ exports.confirmEscrowCheckout = async (req, res, next) => {
 
 exports.acceptWork = async (req, res, next) => {
   try {
-    const data = await svc.acceptWork(req.user.id, req.params.id);
+    const data = await svc.acceptWork(req.user.id, req.params.id, req.body?.payment_type);
     return response.success(res, 'Work accepted. Booking completed.', data);
   } catch (err) { next(err); }
 };
@@ -222,7 +222,7 @@ exports.rejectWork = async (req, res, next) => {
  */
 exports.approveWorkEntry = async (req, res, next) => {
   try {
-    const data = await svc.approveWorkEntry(req.user.id, req.params.id, req.params.entryId);
+    const data = await svc.approveWorkEntry(req.user.id, req.params.id, req.params.entryId, req.body?.payment_type);
     return response.success(res, 'Work entry approved and paid', data);
   } catch (err) { next(err); }
 };
@@ -385,8 +385,12 @@ exports.createMilestones = async (req, res, next) => {
  *       Once every milestone on a booking is accepted, the booking itself is marked completed automatically.
  *       If the booking is in escrow mode, this does NOT settle immediately — it instead returns
  *       `{ escrow: true, checkout_url, session_id }` so the client can redirect the buyer to pay for
- *       this specific milestone via Stripe Checkout. The milestone is only marked paid once that
- *       checkout completes (webhook or `GET .../escrow/confirm`).
+ *       this specific milestone via Stripe Checkout.
+ *
+ *       On the FIRST call for a milestone (payment_status still 'unpaid'), pass `payment_type` to choose
+ *       how: 'direct' (default) is a single real charge, released the moment it's paid; 'hold' places a
+ *       manual-capture hold instead — nothing is charged yet, and once that hold is confirmed (webhook),
+ *       calling this endpoint again (no body needed the second time) captures it and releases the payout.
  *     tags: [Buyer - Bookings]
  *     security: [{ bearerAuth: [] }]
  *     parameters:
@@ -398,6 +402,14 @@ exports.createMilestones = async (req, res, next) => {
  *         name: milestoneId
  *         required: true
  *         schema: { type: integer }
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               payment_type: { type: string, enum: [direct, hold], description: "Escrow mode only, first call only. Defaults to 'direct'." }
  *     responses:
  *       200:
  *         description: Milestone accepted and paid out (wallet mode), OR an escrow Checkout session to complete (escrow mode)
@@ -418,7 +430,7 @@ exports.createMilestones = async (req, res, next) => {
  */
 exports.acceptMilestone = async (req, res, next) => {
   try {
-    const data = await svc.acceptMilestone(req.user.id, req.params.id, req.params.milestoneId);
+    const data = await svc.acceptMilestone(req.user.id, req.params.id, req.params.milestoneId, req.body?.payment_type);
     return response.success(res, 'Milestone accepted', data);
   } catch (err) { next(err); }
 };

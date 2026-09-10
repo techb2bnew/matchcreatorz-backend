@@ -16,9 +16,12 @@ const startServer = async () => {
     console.log(`    Host : ${env.DB_HOST}:${env.DB_PORT}`);
     console.log(`    DB   : ${env.DB_NAME}`);
 
-    // 2. Sync models — alter:true adds/modifies columns without dropping tables
-    await sequelize.sync({ alter: true });
-    console.log('✅  Models synced');
+    // 2. Model sync is NOT run here — even a plain sync() walks every table
+    // against the DB (this project's DB is a remote RDS instance), which is
+    // slow to pay on every ordinary restart/nodemon reload. Run it explicitly
+    // — and only when you've actually added/changed a model — via:
+    //   npm run db:sync        (creates any missing tables)
+    //   npm run db:sync:alter  (also reconciles column/constraint diffs)
 
     // 3. Start HTTP server (wrapped so Socket.IO can attach)
     const server = http.createServer(app);

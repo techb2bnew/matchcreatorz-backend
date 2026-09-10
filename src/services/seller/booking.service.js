@@ -167,6 +167,29 @@ exports.submitWorkEntry = async (sellerId, id, { work_date, description, hours, 
 // Seller accepts the buyer's counter (they logged 5h, buyer offered to pay
 // for 3h, seller agrees) — settles at the countered hours.
 exports.acceptWorkEntryCounter = async (sellerId, id, entryId) => {
+  // Escrow diversion: the seller agreeing to the buyer's counter can't itself
+  // charge the buyer's card (no buyer browser session to redirect here). Fold
+  // the counter into the entry's own hours and hand it back to 'pending' so
+  // the buyer's normal Approve flow (approveWorkEntry) picks it up and offers
+  // the Direct/Hold choice. Wallet mode is untouched below.
+  const preBooking = await Booking.findOne({ where: { id, seller_id: sellerId } });
+  if (preBooking && preBooking.payment_mode === 'escrow') {
+    const entry = await BookingWorkEntry.findOne({ where: { id: entryId, booking_id: preBooking.id } });
+    if (!entry) throw Object.assign(new Error('Work entry not found'), { status: 404 });
+    if (entry.status !== 'countered' || entry.counter_by !== 'buyer')
+      throw Object.assign(new Error('There is no buyer counter to accept on this entry'), { status: 400 });
+
+    await entry.update({
+      hours: Number(entry.counter_hours),
+      status: 'pending',
+      counter_hours: null, counter_by: null, counter_note: null,
+    });
+
+    const buyer = await User.findByPk(preBooking.buyer_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
+    if (buyer) notify.workEntrySubmitted(buyer, preBooking, entry); // reuse: "please review/pay" ping
+    return entry;
+  }
+
   return sequelize.transaction(async (t) => {
     const booking = await Booking.findOne({
       where: { id, seller_id: sellerId }, lock: t.LOCK.UPDATE, transaction: t,

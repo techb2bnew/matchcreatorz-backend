@@ -35,12 +35,32 @@ const BookingWorkEntry = sequelize.define('BookingWorkEntry', {
   },
 
   // Mirrors BookingMilestone's payment_status — settled only once, via
-  // services/shared/workEntry.service.js:settleWorkEntry.
+  // services/shared/workEntry.service.js:settleWorkEntry. 'held' only occurs
+  // in escrow mode with payment_type 'hold' (see below), between the hold
+  // being placed and its later capture/release.
   payment_status: {
-    type:         DataTypes.ENUM('unpaid', 'released'),
+    type:         DataTypes.ENUM('unpaid', 'held', 'released'),
     allowNull:    false,
     defaultValue: 'unpaid',
   },
+
+  // Escrow mode only (ignored for wallet-mode bookings, which always settle
+  // straight to the wallet regardless of this field). Defaults to 'direct'
+  // but is really decided by the BUYER at Approve time (not at submit time) —
+  // see buyer/booking.service.js:approveWorkEntry, which persists whichever
+  // the buyer picks the moment payment_status is still 'unpaid':
+  //   direct → a single real Stripe charge, released the moment it's paid.
+  //   hold   → places a manual-capture hold first (payment_status → 'held',
+  //            nothing released yet); a second Approve click captures it and
+  //            releases the payout.
+  payment_type: {
+    type:         DataTypes.ENUM('direct', 'hold'),
+    allowNull:    false,
+    defaultValue: 'direct',
+  },
+
+  // Stripe PaymentIntent for THIS entry's own hold/charge (escrow mode only).
+  escrow_payment_intent_id: { type: DataTypes.STRING, allowNull: true },
 
   // Counter-offer — buyer proposes fewer hours than the seller logged.
   counter_hours: { type: DataTypes.DECIMAL(6, 2), allowNull: true },

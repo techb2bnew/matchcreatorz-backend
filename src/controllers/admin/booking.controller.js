@@ -192,6 +192,21 @@ exports.resolveDispute = async (req, res) => {
     // for these, since only one entry among many is disputed. Resolved
     // independently of the whole-booking path below.
     if (entry_id) {
+      const entryPreCheck = await BookingWorkEntry.findOne({ where: { id: entry_id, booking_id: booking.id } });
+      if (!entryPreCheck) return res.status(404).json({ success: false, message: 'Work entry not found' });
+      if (entryPreCheck.status !== 'disputed')
+        return res.status(400).json({ success: false, message: 'Entry is not in dispute' });
+
+      // Escrow: a buyer can dispute a 'hold'-type entry before ever capturing
+      // it (Pay & Hold, then change their mind) — capture/cancel that hold
+      // BEFORE opening the DB transaction, a Stripe network call must never
+      // happen while holding row locks.
+      const hadActiveHold = entryPreCheck.payment_type === 'hold' && entryPreCheck.payment_status === 'held';
+      if (hadActiveHold) {
+        if (resolution === 'completed') await escrow.captureWorkEntryHold(entryPreCheck);
+        else await escrow.cancelWorkEntryHold(entryPreCheck);
+      }
+
       const result = await sequelize.transaction(async (t) => {
         const lockedBooking = await Booking.findByPk(booking.id, { lock: t.LOCK.UPDATE, transaction: t });
         const entry = await BookingWorkEntry.findOne({
@@ -205,8 +220,12 @@ exports.resolveDispute = async (req, res) => {
           // Favour seller — pay at the counter if one was pending, else the full logged hours.
           return settleWorkEntry(lockedBooking, entry, { hours: Number(entry.counter_hours ?? entry.hours), t });
         }
-        // Favour buyer — no payment.
-        await entry.update({ status: 'rejected' }, { transaction: t });
+        // Favour buyer — no payment. Reflect the cancelled hold, if any.
+        await entry.update({
+          status: 'rejected',
+          payment_status: hadActiveHold ? 'unpaid' : entry.payment_status,
+          escrow_payment_intent_id: hadActiveHold ? null : entry.escrow_payment_intent_id,
+        }, { transaction: t });
         return entry;
       });
       return res.json({ success: true, message: `Entry dispute resolved as ${resolution}`, data: result });

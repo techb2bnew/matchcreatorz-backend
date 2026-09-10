@@ -1,6 +1,6 @@
 'use strict';
 const { Op } = require('sequelize');
-const { sequelize, Wallet, WalletTransaction, Withdrawal, Booking, BookingMilestone, User } = require('../../models');
+const { sequelize, Wallet, WalletTransaction, Withdrawal, Booking, BookingMilestone, BookingWorkEntry, User } = require('../../models');
 const wallet     = require('../../services/wallet/wallet.service');
 const topup      = require('../../services/wallet/topup.service');
 const withdraw   = require('../../services/wallet/withdrawal.service');
@@ -391,14 +391,25 @@ exports.webhook = async (req, res) => {
       } else if (session.metadata?.kind === 'escrow_hold') {
         const full = await stripe.getCheckoutSessionWithIntent(session.id);
         await escrow.confirmHold(full);
+      } else if (session.metadata?.kind === 'escrow_booking_charge') {
+        await escrow.confirmBookingCharge(session);
+      } else if (session.metadata?.kind === 'escrow_milestone_hold') {
+        const full = await stripe.getCheckoutSessionWithIntent(session.id);
+        await escrow.confirmMilestoneHold(full);
       } else if (session.metadata?.kind === 'escrow_milestone_charge') {
         await escrow.confirmMilestoneCharge(session);
+      } else if (session.metadata?.kind === 'escrow_entry_hold') {
+        const full = await stripe.getCheckoutSessionWithIntent(session.id);
+        await escrow.confirmWorkEntryHold(full);
+      } else if (session.metadata?.kind === 'escrow_entry_charge') {
+        await escrow.confirmWorkEntryCharge(session);
       } else {
         await topup.creditFromSession(session);
       }
     } else if (event.type === 'payment_intent.canceled') {
       // A manual-capture PaymentIntent Stripe auto-cancels ~7 days after
-      // creation if it was never captured (whole-booking escrow hold only).
+      // creation if it was never captured (whole-booking hold, or a
+      // milestone hold — payment_type 'hold').
       const pi = event.data.object;
       const booking = await Booking.findOne({ where: { escrow_payment_intent_id: pi.id } });
       if (booking && booking.payment_status === 'held' && !booking.escrow_captured_at) {
@@ -409,6 +420,20 @@ exports.webhook = async (req, res) => {
         ]);
         if (seller) notify.bookingCancelledByBuyer(seller, booking);
         if (buyer) notify.bookingCancelledBySeller(buyer, booking); // reuse: generic "booking cancelled" ping
+      } else {
+        // A milestone or work-entry hold expiring is far less disruptive than
+        // an entire booking falling through — just reset it back to unpaid so
+        // the buyer's next Accept/Approve click places a fresh hold, instead
+        // of cancelling the whole booking over one stale stage/entry.
+        const milestone = await BookingMilestone.findOne({ where: { escrow_payment_intent_id: pi.id } });
+        if (milestone && milestone.payment_status === 'held' && milestone.status !== 'approved') {
+          await milestone.update({ payment_status: 'unpaid', escrow_payment_intent_id: null });
+        } else {
+          const entry = await BookingWorkEntry.findOne({ where: { escrow_payment_intent_id: pi.id } });
+          if (entry && entry.payment_status === 'held' && entry.status !== 'approved') {
+            await entry.update({ payment_status: 'unpaid', escrow_payment_intent_id: null });
+          }
+        }
       }
     } else if (event.type === 'account.updated') {
       const acct = event.data.object;

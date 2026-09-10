@@ -109,8 +109,22 @@ const Booking = sequelize.define('Booking', {
     defaultValue: 'wallet',
   },
 
-  // Stripe PaymentIntent backing the whole-booking manual-capture hold
-  // (escrow mode, non-milestone bookings only).
+  // Escrow mode only (ignored for wallet-mode bookings). Defaults to 'direct'
+  // but is really decided by the BUYER at Accept & Pay time (not at booking
+  // creation) — see buyer/booking.service.js:acceptWork, which persists
+  // whichever the buyer picks the moment payment_status is still 'unpaid':
+  //   direct → a single real Stripe charge, released the moment it's paid.
+  //   hold   → today's original manual-capture hold; a second Accept & Pay
+  //            click captures it and releases the payout.
+  payment_type: {
+    type:         DataTypes.ENUM('direct', 'hold'),
+    allowNull:    false,
+    defaultValue: 'direct',
+  },
+
+  // Stripe PaymentIntent backing the whole-booking payment (escrow mode,
+  // non-milestone bookings only) — either a manual-capture hold's intent, or
+  // a direct charge's intent, depending on payment_type above.
   escrow_payment_intent_id: {
     type:      DataTypes.STRING,
     allowNull: true,
