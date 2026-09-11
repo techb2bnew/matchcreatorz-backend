@@ -115,7 +115,7 @@ exports.createBooking = async (req, res, next) => {
  * @swagger
  * /api/v1/buyer/bookings/{id}/escrow/checkout:
  *   post:
- *     summary: (Re)create a Stripe Checkout session for an escrow-mode booking's hold
+ *     summary: (Re)create an embedded Stripe Checkout session for an escrow-mode booking's hold
  *     tags: [Buyer - Bookings]
  *     security: [{ bearerAuth: [] }]
  *     parameters:
@@ -124,7 +124,7 @@ exports.createBooking = async (req, res, next) => {
  *         required: true
  *         schema: { type: integer }
  *     responses:
- *       200: { description: "{ checkout_url, session_id }" }
+ *       200: { description: "{ client_secret, session_id } — mount Stripe's Embedded Checkout with client_secret" }
  *       400: { description: Not an escrow booking / already paid }
  *       404: { description: Not found }
  */
@@ -224,6 +224,27 @@ exports.approveWorkEntry = async (req, res, next) => {
   try {
     const data = await svc.approveWorkEntry(req.user.id, req.params.id, req.params.entryId, req.body?.payment_type);
     return response.success(res, 'Work entry approved and paid', data);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
+ * /api/v1/buyer/bookings/{id}/work-entries/{entryId}/cancel-hold:
+ *   patch:
+ *     summary: Cancel a work entry's Pay & Hold before it's captured
+ *     description: Releases the Stripe card authorization only — the work entry itself is untouched.
+ *     tags: [Buyer - Bookings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: integer } }
+ *       - { in: path, name: entryId, required: true, schema: { type: integer } }
+ *     responses:
+ *       200: { description: Hold cancelled }
+ */
+exports.cancelWorkEntryHoldPayment = async (req, res, next) => {
+  try {
+    const data = await svc.cancelWorkEntryHoldPayment(req.user.id, req.params.id, req.params.entryId);
+    return response.success(res, 'Hold cancelled', data);
   } catch (err) { next(err); }
 };
 
@@ -332,6 +353,29 @@ exports.cancelBooking = async (req, res, next) => {
 
 /**
  * @swagger
+ * /api/v1/buyer/bookings/{id}/cancel-hold:
+ *   patch:
+ *     summary: Cancel a whole-booking Pay & Hold before it's captured
+ *     description: |
+ *       Releases the Stripe card authorization without affecting the booking itself — the buyer
+ *       can pay again (direct or hold) whenever they're ready. Only valid while the hold is still
+ *       uncaptured (payment_status = held).
+ *     tags: [Buyer - Bookings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: integer } }
+ *     responses:
+ *       200: { description: Hold cancelled }
+ */
+exports.cancelHoldPayment = async (req, res, next) => {
+  try {
+    const data = await svc.cancelHoldPayment(req.user.id, req.params.id);
+    return response.success(res, 'Hold cancelled', data);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
  * /api/v1/buyer/bookings/{id}/milestones:
  *   post:
  *     summary: Split a booking's total amount into milestones (buyer-initiated)
@@ -384,8 +428,8 @@ exports.createMilestones = async (req, res, next) => {
  *     description: |
  *       Once every milestone on a booking is accepted, the booking itself is marked completed automatically.
  *       If the booking is in escrow mode, this does NOT settle immediately — it instead returns
- *       `{ escrow: true, checkout_url, session_id }` so the client can redirect the buyer to pay for
- *       this specific milestone via Stripe Checkout.
+ *       `{ escrow: true, client_secret, session_id }` so the client can mount Stripe's Embedded Checkout
+ *       (renders inline, no redirect) for the buyer to pay for this specific milestone.
  *
  *       On the FIRST call for a milestone (payment_status still 'unpaid'), pass `payment_type` to choose
  *       how: 'direct' (default) is a single real charge, released the moment it's paid; 'hold' places a
@@ -420,10 +464,10 @@ exports.createMilestones = async (req, res, next) => {
  *                 - type: object
  *                   description: Wallet mode — settled immediately
  *                 - type: object
- *                   description: Escrow mode — redirect to checkout_url
+ *                   description: Escrow mode — mount Stripe's Embedded Checkout with client_secret
  *                   properties:
  *                     escrow: { type: boolean, example: true }
- *                     checkout_url: { type: string }
+ *                     client_secret: { type: string }
  *                     session_id: { type: string }
  *       400: { description: Milestone is not awaiting acceptance }
  *       404: { description: Not found }
@@ -467,6 +511,27 @@ exports.rejectMilestone = async (req, res, next) => {
   try {
     const data = await svc.rejectMilestone(req.user.id, req.params.id, req.params.milestoneId, req.body.dispute_reason);
     return response.success(res, 'Milestone rejected', data);
+  } catch (err) { next(err); }
+};
+
+/**
+ * @swagger
+ * /api/v1/buyer/bookings/{id}/milestones/{milestoneId}/cancel-hold:
+ *   patch:
+ *     summary: Cancel a milestone's Pay & Hold before it's captured
+ *     description: Releases the Stripe card authorization only — the milestone itself is untouched.
+ *     tags: [Buyer - Bookings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: integer } }
+ *       - { in: path, name: milestoneId, required: true, schema: { type: integer } }
+ *     responses:
+ *       200: { description: Hold cancelled }
+ */
+exports.cancelMilestoneHoldPayment = async (req, res, next) => {
+  try {
+    const data = await svc.cancelMilestoneHoldPayment(req.user.id, req.params.id, req.params.milestoneId);
+    return response.success(res, 'Hold cancelled', data);
   } catch (err) { next(err); }
 };
 

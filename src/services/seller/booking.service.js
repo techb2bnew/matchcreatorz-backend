@@ -141,6 +141,7 @@ exports.submitWorkEntry = async (sellerId, id, { work_date, description, hours, 
 
     const rate   = Number(booking.hourly_rate);
     const amount = wallet.round2(h * rate);
+    const fee    = await computeFee(amount);
 
     const entry = await BookingWorkEntry.create({
       booking_id:  booking.id,
@@ -149,7 +150,7 @@ exports.submitWorkEntry = async (sellerId, id, { work_date, description, hours, 
       hours:       h,
       rate,
       amount,
-      platform_fee: computeFee(amount),
+      platform_fee: fee,
       status:      'pending',
       attachments: Array.isArray(attachments) ? attachments : [],
       submitted_at: new Date(),
@@ -249,7 +250,7 @@ exports.createMilestones = async (sellerId, id, milestones) => {
   // happens per-milestone instead, so release that hold before proceeding.
   if (booking.payment_mode === 'escrow' && booking.payment_status === 'held') {
     await escrow.cancelHold(booking);
-    await booking.update({ payment_status: 'unpaid' });
+    await booking.update({ payment_status: 'unpaid', escrow_payment_intent_id: null, escrow_held_at: null });
   }
 
   return createMilestonesShared(booking, milestones, 'seller');

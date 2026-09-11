@@ -7,6 +7,7 @@ const { sequelize, Booking, User } = require('./src/models/index');  // loads al
 const { Op }          = require('sequelize');
 const { initSocket }  = require('./src/socket');
 const notify           = require('./src/helpers/notification.helper');
+const escrow            = require('./src/services/shared/escrow.service');
 
 const startServer = async () => {
   try {
@@ -49,21 +50,39 @@ const startServer = async () => {
     process.on('SIGTERM', () => shutdown('SIGTERM'));
     process.on('SIGINT',  () => shutdown('SIGINT'));
 
-    // Escrow whole-booking holds (manual-capture PaymentIntents) auto-cancel
-    // ~7 days after creation if never captured — remind the buyer at 5 days so
-    // they have a window to accept the work before it expires. No existing
-    // scheduler infra in this codebase, so a plain interval is the minimal fit.
-    const ESCROW_REMINDER_INTERVAL_MS = 6 * 60 * 60 * 1000; // every 6h
+    // Escrow holds (manual-capture PaymentIntents — whole-booking, milestone,
+    // or work entry) only ever get resolved by the buyer clicking Accept/
+    // Release again — if they never come back, the hold would otherwise just
+    // sit there until Stripe's own 7-day ceiling. Two jobs on the same
+    // interval: proactively cancel anything past the admin's configured
+    // hold_days (services/shared/escrow.service.js:sweepExpiredHolds), and
+    // remind the buyer shortly before that happens. No existing scheduler
+    // infra in this codebase, so a plain interval is the minimal fit.
+    const ESCROW_SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000; // every 6h
     setInterval(async () => {
       try {
-        const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+        const result = await escrow.sweepExpiredHolds();
+        if (result.bookings || result.milestones || result.entries) {
+          console.log('Escrow hold auto-cancel sweep:', result);
+        }
+      } catch (err) {
+        console.error('Escrow auto-cancel sweep error:', err && err.message);
+      }
+
+      try {
+        const holdDays = await escrow.getEscrowHoldDays();
+        // Only worth a separate reminder if the window leaves at least a day
+        // of runway after it fires — for a 1-2 day hold_days setting the
+        // sweep above is the buyer's only real signal.
+        if (holdDays <= 2) return;
+        const reminderCutoff = new Date(Date.now() - (holdDays - 2) * 24 * 60 * 60 * 1000);
         const bookings = await Booking.findAll({
           where: {
             payment_mode: 'escrow',
             escrow_payment_intent_id: { [Op.ne]: null },
             escrow_captured_at: null,
             escrow_reminder_sent_at: null,
-            created_at: { [Op.lt]: fiveDaysAgo },
+            escrow_held_at: { [Op.lt]: reminderCutoff },
           },
         });
         for (const booking of bookings) {
@@ -76,7 +95,7 @@ const startServer = async () => {
       } catch (err) {
         console.error('Escrow reminder sweep error:', err && err.message);
       }
-    }, ESCROW_REMINDER_INTERVAL_MS);
+    }, ESCROW_SWEEP_INTERVAL_MS);
 
   } catch (err) {
     console.error('\n❌  Failed to start server:', err.message);

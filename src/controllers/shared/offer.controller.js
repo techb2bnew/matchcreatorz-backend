@@ -218,7 +218,7 @@ exports.acceptOffer = async (req, res, next) => {
     }
 
     const amount = Number(offer.amount);
-    const fee    = computeFee(amount);
+    const fee    = await computeFee(amount);
 
     // No wallet charge here — payment is deferred until the seller actually
     // submits work. Booking + offer updates still happen atomically.

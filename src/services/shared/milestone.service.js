@@ -29,31 +29,48 @@ const platformAdminId = async () => {
  * The unique (milestone_id, type) index on wallet_transactions is the
  * DB-level backstop in case that discipline is ever violated elsewhere.
  */
-const settleMilestone = async (booking, milestone, { amount, t }) => {
-  const fee     = computeFee(amount);
-  const earning = wallet.round2(amount - fee);
+const settleMilestone = async (booking, milestone, { amount, t, stripeFee }) => {
+  const fee     = await computeFee(amount);
   const adminId = await platformAdminId();
 
   // `wasHeld` covers legacy milestones from before deferred payment existed,
   // where the money was already collected up front — don't re-charge those.
   const wasHeld = milestone.payment_status === 'held';
+  // Seller absorbs Stripe's processing fee — see settleBooking for why.
+  const sFee    = wasHeld && stripeFee != null ? wallet.round2(stripeFee) : 0;
+  const earning = wallet.round2(amount - fee - sFee);
+  // Fee breakdown attached to every transaction this settlement creates —
+  // see the identical comment in shared/booking.service.js:settleBooking.
+  const feeMeta = { gross_amount: amount, platform_fee: fee, stripe_fee: wasHeld ? stripeFee : null };
 
   if (!wasHeld) {
     await wallet.debit(booking.buyer_id, amount, {
       type: 'booking_payment', booking_id: booking.id, milestone_id: milestone.id,
       note: `Payment for milestone "${milestone.title}" — booking #${booking.id}`,
+      ...feeMeta,
+    }, t);
+  } else {
+    // The buyer's card was charged directly via Stripe for this stage —
+    // nothing to debit from their wallet, but without a row here their
+    // transaction history would show no trace of this payment at all.
+    await wallet.credit(booking.buyer_id, 0, {
+      type: 'escrow_payment', booking_id: booking.id, milestone_id: milestone.id,
+      note: `Paid via Stripe for milestone "${milestone.title}" — booking #${booking.id}`,
+      ...feeMeta,
     }, t);
   }
 
   await wallet.credit(booking.seller_id, earning, {
     type: 'earning', booking_id: booking.id, milestone_id: milestone.id,
     note: `Earning from milestone "${milestone.title}" — booking #${booking.id}`,
+    ...feeMeta,
   }, t);
 
   if (adminId && fee > 0) {
     await wallet.credit(adminId, fee, {
       type: 'platform_fee', booking_id: booking.id, milestone_id: milestone.id,
       note: `Platform fee from milestone "${milestone.title}" — booking #${booking.id}`,
+      ...feeMeta,
     }, t);
   }
 

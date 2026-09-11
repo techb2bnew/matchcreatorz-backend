@@ -1,8 +1,22 @@
 'use strict';
 const bcrypt     = require('bcryptjs');
-const { User, BuyerProfile, Booking, Wallet } = require('../../models/index');
+const { User, BuyerProfile, Booking, WalletTransaction } = require('../../models/index');
 const { sendAdminWelcome }   = require('../../helpers/email.helper');
 const notify                 = require('../../helpers/notification.helper');
+
+// A buyer's real spend isn't `wallet.total_out` — that only tracks money
+// debited from their in-app wallet BALANCE, which escrow-mode bookings never
+// touch at all (Stripe charges the card directly). The true total is the
+// wallet ledger: wallet-mode debits (`booking_payment`, stored negative) plus
+// the gross of every card payment (`escrow_payment`, amount always 0 but
+// `gross_amount` holds what was actually charged).
+const computeTotalSpent = async (buyerId) => {
+  const [walletSpent, cardSpent] = await Promise.all([
+    WalletTransaction.sum('amount', { where: { user_id: buyerId, type: 'booking_payment' } }),
+    WalletTransaction.sum('gross_amount', { where: { user_id: buyerId, type: 'escrow_payment' } }),
+  ]);
+  return Math.round((Math.abs(walletSpent || 0) + Number(cardSpent || 0)) * 100) / 100;
+};
 
 const buyerInclude = {
   model:      BuyerProfile,
@@ -90,11 +104,11 @@ const listBuyers = async ({ page = 1, limit = 10, search, approval_status, statu
     // Stats for the ENTIRE filtered set are needed up front — either to sort
     // by a computed column, or to let search match against Bookings/Spent.
     let withStats = await Promise.all(filtered.map(async (u) => {
-      const [bookingsCount, wallet] = await Promise.all([
+      const [bookingsCount, totalSpent] = await Promise.all([
         Booking.count({ where: { buyer_id: u.id } }),
-        Wallet.findOne({ where: { user_id: u.id }, attributes: ['total_out'] }),
+        computeTotalSpent(u.id),
       ]);
-      return { user: u, bookingsCount, totalSpent: Number(wallet?.total_out || 0) };
+      return { user: u, bookingsCount, totalSpent };
     }));
 
     if (term) {
@@ -140,11 +154,11 @@ const listBuyers = async ({ page = 1, limit = 10, search, approval_status, statu
   // Real per-buyer stats (bookings placed, total spent) — only computed for
   // the current page, since the buyer list itself is not paginated at the SQL level.
   const buyers = await Promise.all(paginated.map(async (u) => {
-    const [bookingsCount, wallet] = await Promise.all([
+    const [bookingsCount, totalSpent] = await Promise.all([
       Booking.count({ where: { buyer_id: u.id } }),
-      Wallet.findOne({ where: { user_id: u.id }, attributes: ['total_out'] }),
+      computeTotalSpent(u.id),
     ]);
-    return formatBuyer(u, bookingsCount, Number(wallet?.total_out || 0));
+    return formatBuyer(u, bookingsCount, totalSpent);
   }));
 
   return { buyers, total, page: Number(page), limit: Number(limit) };
@@ -157,11 +171,11 @@ const getBuyerById = async (id) => {
     include: [buyerInclude],
   });
   if (!user) throw { statusCode: 404, message: 'Buyer not found' };
-  const [bookingsCount, wallet] = await Promise.all([
+  const [bookingsCount, totalSpent] = await Promise.all([
     Booking.count({ where: { buyer_id: user.id } }),
-    Wallet.findOne({ where: { user_id: user.id }, attributes: ['total_out'] }),
+    computeTotalSpent(user.id),
   ]);
-  return formatBuyer(user, bookingsCount, Number(wallet?.total_out || 0));
+  return formatBuyer(user, bookingsCount, totalSpent);
 };
 
 // ── Add buyer ─────────────────────────────────────────────────────────

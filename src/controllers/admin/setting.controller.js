@@ -15,8 +15,15 @@ const DEFAULTS = {
     app_name: 'MatchCreatorz', support_email: 'support@matchcreatorz.com',
     support_phone: '', app_version: '1.0.0', timezone: 'Asia/Kolkata', currency: 'INR',
   },
-  escrow_settings: { enabled: false },
+  // hold_days: how long a 'hold'-type escrow payment (see the Pay & Hold
+  // flow) may sit uncaptured before it's automatically cancelled. Capped at
+  // 7 in the backend regardless of what's saved here — Stripe itself
+  // auto-expires an uncaptured manual-capture PaymentIntent after 7 days, so
+  // nothing longer could ever actually be honored.
+  escrow_settings: { enabled: false, hold_days: 7 },
 };
+
+const MAX_HOLD_DAYS = 7;
 
 /**
  * @swagger
@@ -90,6 +97,13 @@ exports.updateSettings = async (req, res, next) => {
     const keys = Object.keys(body).filter(k => allowed.includes(k));
     if (keys.length === 0)
       return response.badRequest(res, `Provide at least one of: ${allowed.join(', ')}`);
+
+    // Clamp at write time (not just when read) so what's shown back to the
+    // admin matches what actually gets enforced — see the comment on
+    // escrow_settings.hold_days in DEFAULTS above.
+    if (body.escrow_settings && body.escrow_settings.hold_days != null) {
+      body.escrow_settings.hold_days = Math.min(MAX_HOLD_DAYS, Math.max(1, Number(body.escrow_settings.hold_days) || MAX_HOLD_DAYS));
+    }
 
     for (const key of keys) {
       const [row, created] = await AppSetting.findOrCreate({

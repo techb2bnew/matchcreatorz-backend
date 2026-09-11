@@ -101,7 +101,7 @@ exports.getPlans = async (req, res, next) => {
  * @swagger
  * /api/v1/seller/connects/purchase:
  *   post:
- *     summary: Buy a connects plan — returns a Stripe Checkout URL
+ *     summary: Buy a connects plan — returns an embedded Stripe Checkout client secret
  *     tags: [Seller - Connects]
  *     security: [{ bearerAuth: [] }]
  *     requestBody:
@@ -112,17 +112,16 @@ exports.getPlans = async (req, res, next) => {
  *             type: object
  *             required: [plan_id]
  *             properties:
- *               plan_id:     { type: string, example: pro }
- *               success_url: { type: string, nullable: true }
- *               cancel_url:  { type: string, nullable: true }
+ *               plan_id:    { type: string, example: pro }
+ *               return_url: { type: string, nullable: true }
  *     responses:
- *       200: { description: "{ url, session_id } — redirect the seller to url" }
+ *       200: { description: "{ client_secret, session_id, publishable_key } — mount Stripe's Embedded Checkout with client_secret" }
  *       400: { description: Invalid plan }
  */
 exports.purchasePlan = async (req, res, next) => {
   try {
     const out = await purchase.createPurchase(req.user, req.body.plan_id, {
-      successUrl: req.body.success_url, cancelUrl: req.body.cancel_url,
+      returnUrl: req.body.return_url,
     });
     return response.success(res, 'Checkout session created', out);
   } catch (err) { return fail(res, err, next); }

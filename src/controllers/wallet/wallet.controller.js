@@ -10,6 +10,7 @@ const notify     = require('../../helpers/notification.helper');
 const stripe     = require('../../helpers/stripe.helper');
 const response   = require('../../helpers/response.helper');
 const env        = require('../../config/env');
+const { getPlatformFeePercent } = require('../../config/fee');
 
 const fail = (res, err, next) => {
   if (err && err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
@@ -29,7 +30,7 @@ const requireRole = (req, role) => req.user.role === role;
  * @swagger
  * /api/v1/wallet/config:
  *   get:
- *     summary: Wallet config (publishable key, fee %, min withdrawal, currency)
+ *     summary: Wallet config (publishable key, fee %, min withdrawal, currency, escrow hold window)
  *     tags: [Wallet]
  *     security: [{ bearerAuth: [] }]
  *     responses: { 200: { description: Config } }
@@ -37,9 +38,14 @@ const requireRole = (req, role) => req.user.role === role;
 exports.config = async (req, res) => response.success(res, 'Wallet config', {
   publishable_key: stripe.publishableKey || '',
   stripe_enabled:  stripe.isEnabled(),
-  fee_percent:     env.PLATFORM_FEE_PERCENT,
+  // Admin-configurable (Settings > Platform Fees) — falls back to
+  // PLATFORM_FEE_PERCENT only until an admin has ever saved a value.
+  fee_percent:     await getPlatformFeePercent(),
   min_withdraw:    env.MIN_WITHDRAW,
   currency:        env.WALLET_CURRENCY,
+  // How long a 'hold'-type escrow payment may sit uncaptured before it's
+  // automatically cancelled — shown to the buyer as the Pay & Hold terms.
+  escrow_hold_days: await escrow.getEscrowHoldDays(),
 });
 
 /**
@@ -82,6 +88,21 @@ exports.summary = async (req, res, next) => {
           })
         : 0;
       data.pending_payment = wallet.round2(wholeBookingPending + (milestonePending || 0));
+
+      // Buyers pay Stripe by card, so their spending never moves the wallet
+      // balance and `total_out` alone under-reports it. Total it from the
+      // ledger instead: real wallet debits (wallet-mode bookings) plus the
+      // gross of every card payment (escrow mode).
+      const [walletSpent, cardSpent, paymentsCount] = await Promise.all([
+        WalletTransaction.sum('amount', { where: { user_id: req.user.id, type: 'booking_payment' } }),
+        WalletTransaction.sum('gross_amount', { where: { user_id: req.user.id, type: 'escrow_payment' } }),
+        WalletTransaction.count({
+          where: { user_id: req.user.id, type: { [Op.in]: ['booking_payment', 'escrow_payment'] } },
+        }),
+      ]);
+      data.card_spent     = wallet.round2(cardSpent || 0);
+      data.total_spent    = wallet.round2(Math.abs(walletSpent || 0) + (cardSpent || 0));
+      data.payments_count = paymentsCount;
     }
     return response.success(res, 'Wallet', data);
   } catch (err) { return fail(res, err, next); }
@@ -112,7 +133,7 @@ exports.transactions = async (req, res, next) => {
  * @swagger
  * /api/v1/wallet/topup:
  *   post:
- *     summary: Start a wallet top-up — returns a Stripe Checkout URL
+ *     summary: Start a wallet top-up — returns an embedded Stripe Checkout client secret
  *     tags: [Buyer - Wallet]
  *     security: [{ bearerAuth: [] }]
  *     requestBody:
@@ -123,16 +144,15 @@ exports.transactions = async (req, res, next) => {
  *             type: object
  *             required: [amount]
  *             properties:
- *               amount:      { type: number, example: 100 }
- *               success_url: { type: string, nullable: true }
- *               cancel_url:  { type: string, nullable: true }
+ *               amount:     { type: number, example: 100 }
+ *               return_url: { type: string, nullable: true }
  *     responses:
- *       200: { description: "{ url, session_id } — redirect the user to url" }
+ *       200: { description: "{ client_secret, session_id, publishable_key } — mount Stripe's Embedded Checkout with client_secret" }
  *       400: { description: Invalid amount }
  */
 exports.topup = async (req, res, next) => {
   try {
-    const out = await topup.createTopup(req.user, req.body.amount, { successUrl: req.body.success_url, cancelUrl: req.body.cancel_url });
+    const out = await topup.createTopup(req.user, req.body.amount, { returnUrl: req.body.return_url });
     return response.success(res, 'Top-up session created', out);
   } catch (err) { return fail(res, err, next); }
 };
@@ -407,19 +427,38 @@ exports.webhook = async (req, res) => {
         await topup.creditFromSession(session);
       }
     } else if (event.type === 'payment_intent.canceled') {
-      // A manual-capture PaymentIntent Stripe auto-cancels ~7 days after
-      // creation if it was never captured (whole-booking hold, or a
-      // milestone hold — payment_type 'hold').
+      // A manual-capture PaymentIntent gets cancelled two ways: Stripe's own
+      // auto-expiry after its hard 7-day cap, OR any of this app's own
+      // deliberate cancel calls (buyer's Cancel Hold, splitting into
+      // milestones, admin dispute resolution, our own proactive sweep) —
+      // every one of those calls stripeHelper.cancelPaymentIntent, which
+      // makes Stripe fire this exact same event right back at us. Those
+      // calls also update the DB themselves, but this webhook can race ahead
+      // of that update and see the still-stale payment_status === 'held' —
+      // so treating every cancellation here as "expired" would wrongly
+      // cancel the whole booking for a benign, deliberate cancel. Only the
+      // hold's own age (same cutoff the sweep uses) can actually tell the
+      // two apart.
       const pi = event.data.object;
       const booking = await Booking.findOne({ where: { escrow_payment_intent_id: pi.id } });
-      if (booking && booking.payment_status === 'held' && !booking.escrow_captured_at) {
-        await booking.update({ status: 'cancelled', payment_status: 'refunded', cancel_reason: 'Escrow hold expired (not captured within 7 days)' });
+      const holdDays = await escrow.getEscrowHoldDays();
+      const cutoff = new Date(Date.now() - holdDays * 24 * 60 * 60 * 1000);
+      const genuinelyExpired = booking?.escrow_held_at && new Date(booking.escrow_held_at) < cutoff;
+
+      if (booking && booking.payment_status === 'held' && !booking.escrow_captured_at && genuinelyExpired) {
+        await booking.update({ status: 'cancelled', payment_status: 'refunded', cancel_reason: `Escrow hold expired (not captured within ${holdDays} day${holdDays === 1 ? '' : 's'})` });
         const [buyer, seller] = await Promise.all([
           User.findByPk(booking.buyer_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] }),
           User.findByPk(booking.seller_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] }),
         ]);
         if (seller) notify.bookingCancelledByBuyer(seller, booking);
         if (buyer) notify.bookingCancelledBySeller(buyer, booking); // reuse: generic "booking cancelled" ping
+      } else if (booking && booking.payment_status === 'held' && !booking.escrow_captured_at) {
+        // Cancelled deliberately by our own app logic, just raced ahead of
+        // that code's own DB update — reset the payment fields (harmless if
+        // that other call already did this) without touching booking.status
+        // or cancel_reason, since this cancellation was never an expiry.
+        await booking.update({ payment_status: 'unpaid', escrow_payment_intent_id: null, escrow_held_at: null });
       } else {
         // A milestone or work-entry hold expiring is far less disruptive than
         // an entire booking falling through — just reset it back to unpaid so

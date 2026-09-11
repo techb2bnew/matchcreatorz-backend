@@ -27,7 +27,7 @@ const {
   getJobBids, acceptBid, rejectBid, counterBid, getJobStats,
 } = require('../../controllers/buyer/job.controller');
 const { searchServices } = require('../../controllers/buyer/service.controller');
-const { listBookings, getBooking, createBooking, acceptWork, rejectWork, cancelBooking, acceptMilestone, rejectMilestone, counterMilestone, approveWorkEntry, counterWorkEntry, disputeWorkEntry, createEscrowCheckout, confirmEscrowCheckout, createMilestones } = require('../../controllers/buyer/booking.controller');
+const { listBookings, getBooking, createBooking, acceptWork, rejectWork, cancelBooking, cancelHoldPayment, acceptMilestone, rejectMilestone, cancelMilestoneHoldPayment, counterMilestone, approveWorkEntry, cancelWorkEntryHoldPayment, counterWorkEntry, disputeWorkEntry, createEscrowCheckout, confirmEscrowCheckout, createMilestones } = require('../../controllers/buyer/booking.controller');
 const { createReview, listReviews } = require('../../controllers/buyer/review.controller');
 const { getStats: getBuyerStats }  = require('../../controllers/buyer/stats.controller');
 const { listFavourites, listFavouriteIds, addFavourite, removeFavourite } = require('../../controllers/buyer/favourite.controller');
@@ -69,11 +69,14 @@ router.get   ('/bookings/:id/escrow/confirm',  confirmEscrowCheckout);
 router.patch ('/bookings/:id/accept',   acceptWork);
 router.patch ('/bookings/:id/reject',   rejectWork);
 router.patch ('/bookings/:id/cancel',   cancelBooking);
+router.patch ('/bookings/:id/cancel-hold', cancelHoldPayment);
 router.post  ('/bookings/:id/milestones',                      createMilestones);
 router.patch ('/bookings/:id/milestones/:milestoneId/accept',  acceptMilestone);
 router.patch ('/bookings/:id/milestones/:milestoneId/reject',  rejectMilestone);
+router.patch ('/bookings/:id/milestones/:milestoneId/cancel-hold', cancelMilestoneHoldPayment);
 router.patch ('/bookings/:id/milestones/:milestoneId/counter', counterMilestone);
 router.patch ('/bookings/:id/work-entries/:entryId/approve',  approveWorkEntry);
+router.patch ('/bookings/:id/work-entries/:entryId/cancel-hold', cancelWorkEntryHoldPayment);
 router.patch ('/bookings/:id/work-entries/:entryId/counter',  counterWorkEntry);
 router.patch ('/bookings/:id/work-entries/:entryId/dispute',  disputeWorkEntry);
 

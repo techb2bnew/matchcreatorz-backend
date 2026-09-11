@@ -27,9 +27,14 @@ const client = () => {
 const toCents = (amount) => Math.round(Number(amount) * 100);
 const fromCents = (cents) => Math.round(Number(cents)) / 100;
 
-// ── Buyer top-up: hosted Checkout session ─────────────────────────────────────
-const createTopupCheckout = async ({ amount, userId, email, successUrl, cancelUrl }) => {
+// ── Buyer top-up: embedded Checkout session (renders inline in our own page,
+// via @stripe/react-stripe-js, instead of redirecting to a Stripe-hosted
+// page) — completion still redirects the browser to returnUrl, same as
+// hosted mode's success_url, so existing confirm/webhook handling is
+// unaffected. ─────────────────────────────────────────────────────────────
+const createTopupCheckout = async ({ amount, userId, email, returnUrl }) => {
   const session = await client().checkout.sessions.create({
+    ui_mode: 'embedded_page',
     mode: 'payment',
     payment_method_types: ['card'],
     customer_email: email || undefined,
@@ -42,10 +47,9 @@ const createTopupCheckout = async ({ amount, userId, email, successUrl, cancelUr
       },
     }],
     metadata: { kind: 'wallet_topup', user_id: String(userId), amount: String(amount) },
-    success_url: successUrl,
-    cancel_url:  cancelUrl,
+    return_url: returnUrl,
   });
-  return { id: session.id, url: session.url };
+  return { id: session.id, clientSecret: session.client_secret };
 };
 
 // Retrieve a session (used to confirm on return, as a webhook fallback)
@@ -62,9 +66,10 @@ const getCheckoutSessionWithIntent = (sessionId) =>
 // hold = manual capture (nothing charged until captured later), otherwise a
 // normal auto-capture charge (this IS the payment, done the moment it's paid).
 // One place calling Stripe for all of them, instead of a near-duplicate
-// function per entity. ─────────────────────────────────────────────────────
-const createEscrowCheckout = async ({ amount, title, description, metadata, hold, email, successUrl, cancelUrl }) => {
+// function per entity. Embedded (see createTopupCheckout's comment above). ──
+const createEscrowCheckout = async ({ amount, title, description, metadata, hold, email, returnUrl }) => {
   const session = await client().checkout.sessions.create({
+    ui_mode: 'embedded_page',
     mode: 'payment',
     payment_method_types: ['card'],
     ...(hold ? { payment_intent_data: { capture_method: 'manual' } } : {}),
@@ -78,18 +83,39 @@ const createEscrowCheckout = async ({ amount, title, description, metadata, hold
       },
     }],
     metadata,
-    success_url: successUrl,
-    cancel_url:  cancelUrl,
+    return_url: returnUrl,
   });
-  return { id: session.id, url: session.url };
+  return { id: session.id, clientSecret: session.client_secret };
 };
 
-const capturePaymentIntent = (paymentIntentId) => client().paymentIntents.capture(paymentIntentId);
+// Both expand the charge's balance transaction — the only place Stripe's own
+// processing fee for this payment is actually available — so callers can
+// pull the real fee via extractStripeFee() without a second round trip.
+const capturePaymentIntent = (paymentIntentId) =>
+  client().paymentIntents.capture(paymentIntentId, { expand: ['latest_charge.balance_transaction'] });
 const cancelPaymentIntent  = (paymentIntentId) => client().paymentIntents.cancel(paymentIntentId);
 
-// ── Seller: buy Connects (hosted Checkout session) ────────────────────────────
-const createConnectsCheckout = async ({ plan, sellerId, email, successUrl, cancelUrl }) => {
+// For an already-captured PaymentIntent (a 'direct' escrow charge, or a
+// wallet top-up) — confirmed via webhook, so we never captured it ourselves
+// and need a fresh fetch to see the fee.
+const getPaymentIntentWithFee = (paymentIntentId) =>
+  client().paymentIntents.retrieve(paymentIntentId, { expand: ['latest_charge.balance_transaction'] });
+
+// Stripe's own processing fee for a charge, in dollars — null if the balance
+// transaction isn't available yet (rare for card payments, but Stripe never
+// guarantees it's ready the instant a charge succeeds) rather than block
+// settlement on it.
+const extractStripeFee = (paymentIntent) => {
+  const charge = paymentIntent && paymentIntent.latest_charge;
+  const bt = charge && typeof charge === 'object' ? charge.balance_transaction : null;
+  if (!bt || typeof bt !== 'object' || typeof bt.fee !== 'number') return null;
+  return fromCents(bt.fee);
+};
+
+// ── Seller: buy Connects (embedded Checkout session) ──────────────────────────
+const createConnectsCheckout = async ({ plan, sellerId, email, returnUrl }) => {
   const session = await client().checkout.sessions.create({
+    ui_mode: 'embedded_page',
     mode: 'payment',
     payment_method_types: ['card'],
     customer_email: email || undefined,
@@ -108,10 +134,9 @@ const createConnectsCheckout = async ({ plan, sellerId, email, successUrl, cance
       plan_name: plan.name,
       connects:  String(plan.connects),
     },
-    success_url: successUrl,
-    cancel_url:  cancelUrl,
+    return_url: returnUrl,
   });
-  return { id: session.id, url: session.url };
+  return { id: session.id, clientSecret: session.client_secret };
 };
 
 // ── Stripe Connect (seller payouts) ───────────────────────────────────────────
@@ -171,5 +196,7 @@ module.exports = {
   createEscrowCheckout,
   capturePaymentIntent,
   cancelPaymentIntent,
+  getPaymentIntentWithFee,
+  extractStripeFee,
   publishableKey: env.STRIPE_PUBLISHABLE_KEY,
 };

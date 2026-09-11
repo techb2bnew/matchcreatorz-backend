@@ -4,9 +4,12 @@ const wallet = require('./wallet.service');
 const stripe = require('../../helpers/stripe.helper');
 const env    = require('../../config/env');
 
-// Buyer starts a top-up → hosted Stripe Checkout. Funds are credited when the
-// `checkout.session.completed` webhook fires (or via the success-return fallback).
-const createTopup = async (user, amount, { successUrl, cancelUrl } = {}) => {
+// Buyer starts a top-up → embedded Stripe Checkout (renders inline in our own
+// page instead of redirecting to a Stripe-hosted one). Funds are credited
+// when the `checkout.session.completed` webhook fires (or via the
+// success-return fallback) — completion still redirects the browser to
+// returnUrl, same as hosted mode's success_url, so that handling is unchanged.
+const createTopup = async (user, amount, { returnUrl } = {}) => {
   if (!stripe.isEnabled()) throw Object.assign(new Error('Payments are not configured'), { statusCode: 500 });
   const amt = wallet.round2(amount);
   if (!amt || amt <= 0) throw Object.assign(new Error('Enter a valid amount'), { statusCode: 400 });
@@ -16,10 +19,9 @@ const createTopup = async (user, amount, { successUrl, cancelUrl } = {}) => {
     amount: amt,
     userId: user.id,
     email:  user.email,
-    successUrl: successUrl || `${env.CLIENT_URL}/buyer/wallet?topup=success&session_id={CHECKOUT_SESSION_ID}`,
-    cancelUrl:  cancelUrl  || `${env.CLIENT_URL}/buyer/wallet?topup=cancel`,
+    returnUrl: returnUrl || `${env.CLIENT_URL}/buyer/wallet?topup=success&session_id={CHECKOUT_SESSION_ID}`,
   });
-  return { url: session.url, session_id: session.id, publishable_key: stripe.publishableKey };
+  return { client_secret: session.clientSecret, session_id: session.id, publishable_key: stripe.publishableKey };
 };
 
 // Idempotent credit for a completed checkout session (webhook OR return fallback).
@@ -32,8 +34,19 @@ const creditFromSession = async (session) => {
   const amount = Number(session.metadata?.amount) || stripe.fromCents(session.amount_total);
   if (!userId || !amount) return { credited: false, reason: 'missing_metadata' };
 
+  // Real Stripe processing fee for this charge, for the fee breakdown shown
+  // on the transaction — best-effort, doesn't block crediting if unavailable.
+  let stripeFee = null;
+  try {
+    const pi = await stripe.getPaymentIntentWithFee(session.payment_intent);
+    stripeFee = stripe.extractStripeFee(pi);
+  } catch (err) {
+    console.error('topup.creditFromSession: failed to fetch Stripe fee:', err && err.message);
+  }
+
   await wallet.credit(userId, amount, {
     type: 'topup', stripe_ref: session.id, note: 'Wallet top-up (Stripe)',
+    gross_amount: amount, stripe_fee: stripeFee,
   });
   return { credited: true, userId, amount };
 };

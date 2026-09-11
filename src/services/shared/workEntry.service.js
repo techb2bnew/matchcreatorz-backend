@@ -30,33 +30,50 @@ const platformAdminId = async () => {
  * The unique (work_entry_id, type) index on wallet_transactions is the
  * DB-level backstop in case that discipline is ever violated elsewhere.
  */
-const settleWorkEntry = async (booking, entry, { hours, t }) => {
+const settleWorkEntry = async (booking, entry, { hours, t, stripeFee }) => {
   const rate     = Number(entry.rate);
   const amount   = wallet.round2(hours * rate);
-  const fee      = computeFee(amount);
-  const earning  = wallet.round2(amount - fee);
+  const fee      = await computeFee(amount);
   const adminId  = await platformAdminId();
 
   // `wasHeld` covers escrow-mode entries whose money was already collected by
   // Stripe (a captured hold, or a direct charge) — don't double-charge those.
   const wasHeld = entry.payment_status === 'held';
+  // Seller absorbs Stripe's processing fee — see settleBooking for why.
+  const sFee    = wasHeld && stripeFee != null ? wallet.round2(stripeFee) : 0;
+  const earning = wallet.round2(amount - fee - sFee);
+  // Fee breakdown attached to every transaction this settlement creates —
+  // see the identical comment in shared/booking.service.js:settleBooking.
+  const feeMeta = { gross_amount: amount, platform_fee: fee, stripe_fee: wasHeld ? stripeFee : null };
 
   if (!wasHeld) {
     await wallet.debit(booking.buyer_id, amount, {
       type: 'booking_payment', booking_id: booking.id, work_entry_id: entry.id,
       note: `Payment — ${hours} hrs on booking #${booking.id} (${entry.work_date})`,
+      ...feeMeta,
+    }, t);
+  } else {
+    // The buyer's card was charged directly via Stripe for this entry —
+    // nothing to debit from their wallet, but without a row here their
+    // transaction history would show no trace of this payment at all.
+    await wallet.credit(booking.buyer_id, 0, {
+      type: 'escrow_payment', booking_id: booking.id, work_entry_id: entry.id,
+      note: `Paid via Stripe — ${hours} hrs on booking #${booking.id} (${entry.work_date})`,
+      ...feeMeta,
     }, t);
   }
 
   await wallet.credit(booking.seller_id, earning, {
     type: 'earning', booking_id: booking.id, work_entry_id: entry.id,
     note: `Earning — ${hours} hrs @ $${rate}/hr, ${entry.work_date} (booking #${booking.id})`,
+    ...feeMeta,
   }, t);
 
   if (adminId && fee > 0) {
     await wallet.credit(adminId, fee, {
       type: 'platform_fee', booking_id: booking.id, work_entry_id: entry.id,
       note: `Platform fee — work entry on booking #${booking.id}`,
+      ...feeMeta,
     }, t);
   }
 

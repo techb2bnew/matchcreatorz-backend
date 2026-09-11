@@ -135,6 +135,15 @@ const Booking = sequelize.define('Booking', {
     allowNull: true,
   },
 
+  // When the hold was actually confirmed (payment_status → 'held') — the
+  // clock the admin's configurable auto-cancel window (escrow_settings.hold_days,
+  // capped at Stripe's own 7-day authorization limit) counts against. Kept
+  // separate from `updated_at`, which other, unrelated updates could bump.
+  escrow_held_at: {
+    type:      DataTypes.DATE,
+    allowNull: true,
+  },
+
   // Set once the 5-day "hold expiring soon" reminder has fired, so the
   // periodic sweep in server.js never re-notifies for the same booking.
   escrow_reminder_sent_at: {

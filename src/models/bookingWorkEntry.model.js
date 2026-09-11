@@ -62,6 +62,10 @@ const BookingWorkEntry = sequelize.define('BookingWorkEntry', {
   // Stripe PaymentIntent for THIS entry's own hold/charge (escrow mode only).
   escrow_payment_intent_id: { type: DataTypes.STRING, allowNull: true },
 
+  // When this entry's hold was confirmed — see the identical field/comment
+  // on Booking.escrow_held_at.
+  escrow_held_at: { type: DataTypes.DATE, allowNull: true },
+
   // Counter-offer — buyer proposes fewer hours than the seller logged.
   counter_hours: { type: DataTypes.DECIMAL(6, 2), allowNull: true },
   counter_by:    { type: DataTypes.ENUM('buyer', 'seller'), allowNull: true },

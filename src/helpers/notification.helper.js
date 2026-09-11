@@ -289,6 +289,15 @@ const bookingCancelledBySeller = (buyer, booking) => notifyUser(buyer, {
   email: () => email.sendBookingCancelled(buyer.email, buyer.name, booking.title, 'seller'),
 });
 
+// The buyer voluntarily released a Pay & Hold authorization before ever
+// capturing it — distinct from bookingCancelledByBuyer (the booking itself is
+// untouched, only the hold on the buyer's card was released).
+const holdCancelledByBuyer = (seller, booking) => notifyUser(seller, {
+  type: 'booking_payment', title: 'Payment Hold Cancelled',
+  body: `The buyer cancelled their card hold for "${booking.title}". The booking is unaffected — they can pay again when ready.`,
+  data: { type: 'hold_cancelled', booking_id: String(booking.id) },
+});
+
 const bookingCancelledByBuyer = (seller, booking) => notifyUser(seller, {
   type: 'booking_cancelled', title: 'Booking Cancelled',
   body: `The booking "${booking.title}" was cancelled by the buyer.`,
@@ -505,6 +514,7 @@ module.exports = {
   escrowExpiringSoon,
   bookingCancelledBySeller,
   bookingCancelledByBuyer,
+  holdCancelledByBuyer,
   // reviews
   reviewReceived,
   // connects

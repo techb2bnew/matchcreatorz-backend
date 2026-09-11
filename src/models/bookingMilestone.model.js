@@ -73,6 +73,10 @@ const BookingMilestone = sequelize.define('BookingMilestone', {
   // moment this milestone is accepted/paid, mirroring the wallet-mode timing.
   escrow_payment_intent_id: { type: DataTypes.STRING, allowNull: true },
 
+  // When this milestone's hold was confirmed — see the identical field/comment
+  // on Booking.escrow_held_at.
+  escrow_held_at: { type: DataTypes.DATE, allowNull: true },
+
   notes:           { type: DataTypes.TEXT, allowNull: true }, // seller's submission note
   dispute_reason:  { type: DataTypes.TEXT, allowNull: true }, // buyer's rejection reason
 

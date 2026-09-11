@@ -15,19 +15,21 @@ const PLANS = [
 
 const getPlan = (planId) => PLANS.find((p) => p.id === planId);
 
-// Seller starts a purchase → hosted Stripe Checkout. Connects are credited when
-// the `checkout.session.completed` webhook fires (or via the return fallback).
-const createPurchase = async (seller, planId, { successUrl, cancelUrl } = {}) => {
+// Seller starts a purchase → embedded Stripe Checkout (renders inline in our
+// own page instead of redirecting to a Stripe-hosted one). Connects are
+// credited when the `checkout.session.completed` webhook fires (or via the
+// return fallback) — completion still redirects the browser to returnUrl,
+// same as hosted mode's success_url, so that handling is unchanged.
+const createPurchase = async (seller, planId, { returnUrl } = {}) => {
   if (!stripe.isEnabled()) throw Object.assign(new Error('Payments are not configured'), { statusCode: 500 });
   const plan = getPlan(planId);
   if (!plan) throw Object.assign(new Error('Invalid plan'), { statusCode: 400 });
 
   const session = await stripe.createConnectsCheckout({
     plan, sellerId: seller.id, email: seller.email,
-    successUrl: successUrl || `${env.CLIENT_URL}/seller/connects?purchase=success&session_id={CHECKOUT_SESSION_ID}`,
-    cancelUrl:  cancelUrl  || `${env.CLIENT_URL}/seller/connects?purchase=cancel`,
+    returnUrl: returnUrl || `${env.CLIENT_URL}/seller/connects?purchase=success&session_id={CHECKOUT_SESSION_ID}`,
   });
-  return { url: session.url, session_id: session.id };
+  return { client_secret: session.clientSecret, session_id: session.id, publishable_key: stripe.publishableKey };
 };
 
 // Idempotent credit for a completed checkout session (webhook OR return fallback).
