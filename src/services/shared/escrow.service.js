@@ -37,7 +37,7 @@ const fetchStripeFeeWithRetry = async (paymentIntentId, label) => {
 
 // ── Settings — short in-process cache so a booking-creation request doesn't
 // need a DB round-trip on the hot path. ───────────────────────────────────
-let _cache = { value: { enabled: false, hold_days: 7 }, at: 0 };
+let _cache = { value: { enabled: true, hold_days: 7 }, at: 0 };
 const CACHE_TTL_MS = 20000;
 
 // Stripe hard-caps a manual-capture PaymentIntent's authorization at 7 days —
@@ -61,12 +61,23 @@ const getEscrowSettings = async () => {
 const isEscrowEnabled  = async () => (await getEscrowSettings()).enabled;
 const getEscrowHoldDays = async () => (await getEscrowSettings()).hold_days;
 
-// A booking gets escrow mode when the toggle is on AND Stripe is configured —
-// fixed-price, milestone, and (now) hourly bookings are all eligible; the
-// difference between them is only in how/when payment is collected.
+// Every booking is paid via Stripe (escrow mode) — there is no buyer wallet
+// balance to fall back to any more (top-up was intentionally removed, buyers
+// pay by card directly). Silently falling back to 'wallet' here used to leave
+// bookings permanently stuck: a buyer with no way to ever fund that balance
+// could never pay for them.
+//
+// The admin's escrow_settings.enabled toggle still exists, but it's no
+// longer a wallet-vs-escrow switch — with no wallet to fall back to, "off"
+// now means "don't allow new bookings at all" (e.g. Stripe misconfigured or
+// payments deliberately paused platform-wide), never a silent switch to a
+// payment mode nothing can settle.
 const resolvePaymentMode = async () => {
-  const enabled = await isEscrowEnabled();
-  return enabled && stripeHelper.isEnabled() ? 'escrow' : 'wallet';
+  if (!stripeHelper.isEnabled())
+    throw Object.assign(new Error('Payments are not configured — contact support before creating a booking'), { statusCode: 500 });
+  if (!(await isEscrowEnabled()))
+    throw Object.assign(new Error('Payments are currently disabled by the platform — please try again later'), { statusCode: 503 });
+  return 'escrow';
 };
 
 const buyerEmailFor = async (buyerId) => {

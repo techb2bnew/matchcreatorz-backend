@@ -15,12 +15,16 @@ const DEFAULTS = {
     app_name: 'MatchCreatorz', support_email: 'support@matchcreatorz.com',
     support_phone: '', app_version: '1.0.0', timezone: 'Asia/Kolkata', currency: 'INR',
   },
+  // enabled: every booking is paid via Stripe with no wallet fallback, so this
+  // defaults to true — "off" is a platform-wide payments kill switch (blocks
+  // new bookings entirely), not a switch back to wallet mode, and shouldn't
+  // default to blocking everything on a fresh install.
   // hold_days: how long a 'hold'-type escrow payment (see the Pay & Hold
   // flow) may sit uncaptured before it's automatically cancelled. Capped at
   // 7 in the backend regardless of what's saved here — Stripe itself
   // auto-expires an uncaptured manual-capture PaymentIntent after 7 days, so
   // nothing longer could ever actually be honored.
-  escrow_settings: { enabled: false, hold_days: 7 },
+  escrow_settings: { enabled: true, hold_days: 7 },
 };
 
 const MAX_HOLD_DAYS = 7;

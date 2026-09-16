@@ -510,7 +510,7 @@ exports.acceptCounterBySeller = async (req, res) => {
     return res.json({ success: true, message: 'Counter accepted. Booking created.', data: { booking, bid } });
   } catch (err) {
     console.error('acceptCounterBySeller:', err);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    return res.status(err.statusCode || 500).json({ success: false, message: err.statusCode ? err.message : 'Server error' });
   }
 };
 
