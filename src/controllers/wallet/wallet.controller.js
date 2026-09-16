@@ -479,6 +479,14 @@ exports.webhook = async (req, res) => {
         }
       }
     } else if (event.type === 'account.updated') {
+      // A classic Accounts v1 event — the v1-shaped payload below only ever
+      // matches an account actually created via v1 (none currently exist;
+      // new accounts all go through Accounts v2, see
+      // stripe.helper.js:createConnectAccount). v2 accounts use Stripe's
+      // separate v2 Event Destinations mechanism instead, which this
+      // classic-webhook endpoint doesn't receive; their status is instead
+      // kept in sync via withdrawal.service.js:syncConnectStatus, called
+      // when the seller returns from onboarding.
       const acct = event.data.object;
       const w = await Wallet.findOne({ where: { stripe_account_id: acct.id } });
       if (w) {

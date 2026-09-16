@@ -34,8 +34,7 @@ const syncConnectStatus = async (userId) => {
   if (!w.stripe_account_id || !stripe.isEnabled()) return wallet.shapeWallet(w);
   try {
     const acct = await stripe.retrieveAccount(w.stripe_account_id);
-    const active = acct.payouts_enabled && acct.charges_enabled;
-    await w.update({ stripe_account_status: active ? 'active' : (acct.requirements?.disabled_reason ? 'restricted' : 'pending') });
+    await w.update({ stripe_account_status: stripe.connectStatusFor(acct) });
   } catch { /* leave status as-is */ }
   return wallet.shapeWallet(await wallet.ensureWallet(userId));
 };
@@ -87,7 +86,18 @@ const approveWithdrawal = async (adminId, id) => {
       transferId = transfer.id;
     }
   } catch (e) {
-    await wd.update({ status: 'failed', admin_id: adminId, admin_note: e.message, processed_at: new Date() });
+    // The transfer never happened — return the reserved amount to the
+    // seller's spendable balance (same as rejectWithdrawal), otherwise it's
+    // stuck in the pending bucket forever: a 'failed' withdrawal can never
+    // be approved or rejected again (both require status === 'pending'), so
+    // without this the seller permanently loses access to that money.
+    await sequelize.transaction(async (t) => {
+      await wallet.releasePending(wd.seller_id, num(wd.amount), t);
+      await wallet.credit(wd.seller_id, num(wd.amount), {
+        type: 'withdrawal_reversal', withdrawal_id: wd.id, note: `Withdrawal failed: ${e.message}`,
+      }, t);
+      await wd.update({ status: 'failed', admin_id: adminId, admin_note: e.message, processed_at: new Date() }, { transaction: t });
+    });
     const failedSeller = await User.findByPk(wd.seller_id, { attributes: ['id', 'name', 'email', 'web_fcm_token', 'mobile_fcm_token'] });
     if (failedSeller) notify.withdrawalFailed(failedSeller, wd, e.message);
     throw Object.assign(new Error(`Stripe transfer failed: ${e.message}`), { statusCode: 402 });

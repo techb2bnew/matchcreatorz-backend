@@ -142,28 +142,65 @@ const createConnectsCheckout = async ({ plan, sellerId, email, returnUrl }) => {
   return { id: session.id, clientSecret: session.client_secret };
 };
 
-// ── Stripe Connect (seller payouts) ───────────────────────────────────────────
+// ── Stripe Connect (seller payouts) — Accounts v2 ─────────────────────────────
+// v1 Accounts (`client().accounts.create`) is no longer accepted for new
+// Connect integrations on this platform ("Stripe no longer recommends
+// Accounts v1..."). Sellers here only ever RECEIVE money via Transfer (never
+// take a charge directly), so this uses the `recipient` configuration, not
+// `merchant` — the v2 equivalent of what `type: 'express'` + a `transfers`
+// capability meant under v1. Stripe requires `application` for both
+// fees/losses_collector on a recipient-only account (the `application_express`
+// / `stripe` options that mirror old v1 Express liability are only available
+// once a `merchant` configuration is also present) — so the platform is the
+// one responsible for fees and any negative/unrecoverable seller balance.
 const createConnectAccount = async ({ email, country = 'US' }) => {
-  const account = await client().accounts.create({
-    type: 'express',
-    email: email || undefined,
-    country,
-    capabilities: { transfers: { requested: true } },
+  const account = await client().v2.core.accounts.create({
+    contact_email: email || undefined,
+    dashboard: 'express',
+    identity: { country },
+    defaults: {
+      responsibilities: { fees_collector: 'application', losses_collector: 'application' },
+    },
+    configuration: {
+      recipient: { capabilities: { stripe_balance: { stripe_transfers: { requested: true } } } },
+    },
   });
   return account;
 };
 
 const createAccountLink = async ({ accountId, refreshUrl, returnUrl }) => {
-  const link = await client().accountLinks.create({
+  const link = await client().v2.core.accountLinks.create({
     account: accountId,
-    refresh_url: refreshUrl,
-    return_url: returnUrl,
-    type: 'account_onboarding',
+    use_case: {
+      type: 'account_onboarding',
+      account_onboarding: {
+        configurations: ['recipient'],
+        refresh_url: refreshUrl,
+        return_url: returnUrl,
+      },
+    },
   });
   return link;
 };
 
-const retrieveAccount = (accountId) => client().accounts.retrieve(accountId);
+// `include` is opt-in on v2 (unlike v1, where these fields are always
+// present) — the capability status this app actually checks
+// (isAccountActive below) lives under configuration.recipient.
+const retrieveAccount = (accountId) =>
+  client().v2.core.accounts.retrieve(accountId, { include: ['configuration.recipient', 'requirements'] });
+
+// v1's `payouts_enabled && charges_enabled` has no v2 equivalent — the
+// signal now lives on the specific capability this app requested
+// (stripe_transfers), which reports its own status directly as
+// 'active' | 'pending' | 'restricted' | 'unsupported' — mapped onto this
+// app's existing Wallet.stripe_account_status enum ('unsupported' → the
+// capability can never be granted, treated the same as 'restricted').
+const connectStatusFor = (account) => {
+  const status = account?.configuration?.recipient?.capabilities?.stripe_balance?.stripe_transfers?.status;
+  if (status === 'active') return 'active';
+  if (status === 'restricted' || status === 'unsupported') return 'restricted';
+  return 'pending';
+};
 
 // Move money from the platform balance to a seller's connected account, then pay
 // it out to their bank. In test mode this works with test connected accounts.
@@ -194,6 +231,7 @@ module.exports = {
   createConnectAccount,
   createAccountLink,
   retrieveAccount,
+  connectStatusFor,
   transferToConnected,
   constructEvent,
   createEscrowCheckout,
