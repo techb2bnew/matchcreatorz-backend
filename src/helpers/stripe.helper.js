@@ -72,7 +72,10 @@ const createEscrowCheckout = async ({ amount, title, description, metadata, hold
     ui_mode: 'embedded_page',
     mode: 'payment',
     payment_method_types: ['card'],
-    ...(hold ? { payment_intent_data: { capture_method: 'manual' } } : {}),
+    // Session metadata alone never reaches the Payment/Charge Stripe's own
+    // dashboard actually shows — copying it onto payment_intent_data.metadata
+    // too puts the same fee breakdown directly on that payment's own page.
+    payment_intent_data: { ...(hold ? { capture_method: 'manual' } : {}), metadata },
     customer_email: email || undefined,
     line_items: [{
       quantity: 1,

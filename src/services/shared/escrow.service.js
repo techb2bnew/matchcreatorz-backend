@@ -67,16 +67,14 @@ const getEscrowHoldDays = async () => (await getEscrowSettings()).hold_days;
 // bookings permanently stuck: a buyer with no way to ever fund that balance
 // could never pay for them.
 //
-// The admin's escrow_settings.enabled toggle still exists, but it's no
-// longer a wallet-vs-escrow switch — with no wallet to fall back to, "off"
-// now means "don't allow new bookings at all" (e.g. Stripe misconfigured or
-// payments deliberately paused platform-wide), never a silent switch to a
-// payment mode nothing can settle.
+// The admin's escrow_settings.enabled toggle ("Delayed Payments") does NOT
+// gate this — it never blocks booking creation or Stripe itself. It only
+// controls whether "Pay & Hold" is offered as a payment choice (see
+// buyer/booking.service.js's acceptWork/acceptMilestone/approveWorkEntry) —
+// off means every payment goes through as an immediate direct charge.
 const resolvePaymentMode = async () => {
   if (!stripeHelper.isEnabled())
     throw Object.assign(new Error('Payments are not configured — contact support before creating a booking'), { statusCode: 500 });
-  if (!(await isEscrowEnabled()))
-    throw Object.assign(new Error('Payments are currently disabled by the platform — please try again later'), { statusCode: 503 });
   return 'escrow';
 };
 
@@ -90,6 +88,17 @@ const buyerEmailFor = async (buyerId) => {
 // since "cancel" is now just the buyer closing our own modal (no Stripe-side
 // redirect involved at all).
 const returnUrlFor = (booking) => `${env.CLIENT_URL}/buyer/bookings/${booking.id}?escrow=success&session_id={CHECKOUT_SESSION_ID}`;
+
+// Stripe metadata values must be strings, and only shows up on the actual
+// Payment/Charge page when copied onto payment_intent_data.metadata (see
+// stripe.helper.js:createEscrowCheckout) — this is purely a visibility aid in
+// the Stripe dashboard, the real settlement math still lives in
+// settleBooking/settleMilestone/settleWorkEntry and is untouched by this.
+const feeMetaFor = (gross, platformFee) => ({
+  gross_amount: wallet.round2(gross).toFixed(2),
+  platform_fee: wallet.round2(platformFee).toFixed(2),
+  seller_earning: wallet.round2(gross - platformFee).toFixed(2),
+});
 
 // The informational `escrow_hold` rows are written the moment a hold is placed
 // and carry "(pending release)" in their note. Without this they'd keep
@@ -135,7 +144,7 @@ const createHoldCheckout = async (booking, { returnUrl } = {}) => {
     amount: Number(booking.amount),
     title: `Escrow hold — ${booking.title}`,
     description: 'MatchCreatorz escrow payment (held until work is approved)',
-    metadata: { kind: 'escrow_hold', booking_id: String(booking.id) },
+    metadata: { kind: 'escrow_hold', booking_id: String(booking.id), ...feeMetaFor(booking.amount, booking.platform_fee) },
     hold: true,
     email,
     returnUrl: returnUrl || returnUrlFor(booking),
@@ -150,7 +159,7 @@ const createBookingChargeCheckout = async (booking, { returnUrl } = {}) => {
     amount: Number(booking.amount),
     title: `Payment — ${booking.title}`,
     description: 'MatchCreatorz direct payment (charged now, released to the seller immediately)',
-    metadata: { kind: 'escrow_booking_charge', booking_id: String(booking.id) },
+    metadata: { kind: 'escrow_booking_charge', booking_id: String(booking.id), ...feeMetaFor(booking.amount, booking.platform_fee) },
     hold: false,
     email,
     returnUrl: returnUrl || returnUrlFor(booking),
@@ -269,11 +278,12 @@ const cancelHold = async (booking) => {
 const createMilestoneChargeCheckout = async (booking, milestone, { amount, returnUrl } = {}) => {
   if (!stripeHelper.isEnabled()) throw Object.assign(new Error('Payments are not configured'), { statusCode: 500 });
   const email = await buyerEmailFor(booking.buyer_id);
+  const fee = await computeFee(Number(amount));
   return stripeHelper.createEscrowCheckout({
     amount: Number(amount),
     title: `Milestone payment — ${milestone.title}`,
     description: `MatchCreatorz escrow milestone charge (${booking.title})`,
-    metadata: { kind: 'escrow_milestone_charge', booking_id: String(booking.id), milestone_id: String(milestone.id) },
+    metadata: { kind: 'escrow_milestone_charge', booking_id: String(booking.id), milestone_id: String(milestone.id), ...feeMetaFor(amount, fee) },
     hold: false,
     email,
     returnUrl: returnUrl || returnUrlFor(booking),
@@ -283,11 +293,12 @@ const createMilestoneChargeCheckout = async (booking, milestone, { amount, retur
 const createMilestoneHoldCheckout = async (booking, milestone, { amount, returnUrl } = {}) => {
   if (!stripeHelper.isEnabled()) throw Object.assign(new Error('Payments are not configured'), { statusCode: 500 });
   const email = await buyerEmailFor(booking.buyer_id);
+  const fee = await computeFee(Number(amount));
   return stripeHelper.createEscrowCheckout({
     amount: Number(amount),
     title: `Milestone hold — ${milestone.title}`,
     description: `MatchCreatorz escrow milestone hold (${booking.title}) — held until you release payment`,
-    metadata: { kind: 'escrow_milestone_hold', booking_id: String(booking.id), milestone_id: String(milestone.id) },
+    metadata: { kind: 'escrow_milestone_hold', booking_id: String(booking.id), milestone_id: String(milestone.id), ...feeMetaFor(amount, fee) },
     hold: true,
     email,
     returnUrl: returnUrl || returnUrlFor(booking),
@@ -394,11 +405,12 @@ const cancelMilestoneHold = async (milestone) => {
 const createWorkEntryChargeCheckout = async (booking, entry, { amount, returnUrl } = {}) => {
   if (!stripeHelper.isEnabled()) throw Object.assign(new Error('Payments are not configured'), { statusCode: 500 });
   const email = await buyerEmailFor(booking.buyer_id);
+  const fee = await computeFee(Number(amount));
   return stripeHelper.createEscrowCheckout({
     amount: Number(amount),
     title: `Work payment — ${entry.work_date}`,
     description: `MatchCreatorz hourly work payment (booking #${booking.id})`,
-    metadata: { kind: 'escrow_entry_charge', booking_id: String(booking.id), work_entry_id: String(entry.id) },
+    metadata: { kind: 'escrow_entry_charge', booking_id: String(booking.id), work_entry_id: String(entry.id), ...feeMetaFor(amount, fee) },
     hold: false,
     email,
     returnUrl: returnUrl || returnUrlFor(booking),
@@ -408,11 +420,12 @@ const createWorkEntryChargeCheckout = async (booking, entry, { amount, returnUrl
 const createWorkEntryHoldCheckout = async (booking, entry, { amount, returnUrl } = {}) => {
   if (!stripeHelper.isEnabled()) throw Object.assign(new Error('Payments are not configured'), { statusCode: 500 });
   const email = await buyerEmailFor(booking.buyer_id);
+  const fee = await computeFee(Number(amount));
   return stripeHelper.createEscrowCheckout({
     amount: Number(amount),
     title: `Work hold — ${entry.work_date}`,
     description: `MatchCreatorz hourly work hold (booking #${booking.id}) — held until you release payment`,
-    metadata: { kind: 'escrow_entry_hold', booking_id: String(booking.id), work_entry_id: String(entry.id) },
+    metadata: { kind: 'escrow_entry_hold', booking_id: String(booking.id), work_entry_id: String(entry.id), ...feeMetaFor(amount, fee) },
     hold: true,
     email,
     returnUrl: returnUrl || returnUrlFor(booking),

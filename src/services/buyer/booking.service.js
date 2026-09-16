@@ -164,7 +164,10 @@ exports.acceptWork = async (buyerId, id, paymentType) => {
     // is persisted, since a 'hold' choice needs a second click later to
     // capture + release it.
     if (booking.payment_status === 'unpaid') {
-      const type = paymentType === 'hold' ? 'hold' : 'direct';
+      // "Pay & Hold" only exists while the admin's Delayed Payments toggle is
+      // on — enforced here too (not just hidden in the UI), so a stale
+      // client can never force a hold once it's been turned off.
+      const type = (paymentType === 'hold' && await escrow.isEscrowEnabled()) ? 'hold' : 'direct';
       if (booking.payment_type !== type) await booking.update({ payment_type: type });
 
       if (type === 'hold') {
@@ -231,7 +234,10 @@ exports.approveWorkEntry = async (buyerId, id, entryId, paymentType) => {
     // First click (nothing paid or held yet) — the buyer picks how to pay
     // right now, mirroring acceptMilestone.
     if (entry.payment_status === 'unpaid') {
-      const type = paymentType === 'hold' ? 'hold' : 'direct';
+      // "Pay & Hold" only exists while the admin's Delayed Payments toggle is
+      // on — enforced here too (not just hidden in the UI), so a stale
+      // client can never force a hold once it's been turned off.
+      const type = (paymentType === 'hold' && await escrow.isEscrowEnabled()) ? 'hold' : 'direct';
       if (entry.payment_type !== type) await entry.update({ payment_type: type });
 
       if (type === 'hold') {
@@ -395,7 +401,10 @@ exports.acceptMilestone = async (buyerId, id, milestoneId, paymentType) => {
     // is persisted, since a 'hold' choice needs a second click later to
     // capture + release it.
     if (milestone.payment_status === 'unpaid') {
-      const type = paymentType === 'hold' ? 'hold' : 'direct';
+      // "Pay & Hold" only exists while the admin's Delayed Payments toggle is
+      // on — enforced here too (not just hidden in the UI), so a stale
+      // client can never force a hold once it's been turned off.
+      const type = (paymentType === 'hold' && await escrow.isEscrowEnabled()) ? 'hold' : 'direct';
       if (milestone.payment_type !== type) await milestone.update({ payment_type: type });
 
       if (type === 'hold') {

@@ -46,6 +46,10 @@ exports.config = async (req, res) => response.success(res, 'Wallet config', {
   // How long a 'hold'-type escrow payment may sit uncaptured before it's
   // automatically cancelled — shown to the buyer as the Pay & Hold terms.
   escrow_hold_days: await escrow.getEscrowHoldDays(),
+  // Admin's Delayed Payments toggle — when off, "Pay & Hold" isn't offered
+  // anywhere and every payment is a direct charge (enforced server-side too,
+  // see buyer/booking.service.js).
+  hold_payments_enabled: await escrow.isEscrowEnabled(),
 });
 
 /**
