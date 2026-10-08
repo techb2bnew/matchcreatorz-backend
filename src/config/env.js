@@ -18,9 +18,10 @@ const env = {
   // Google OAuth (Sign in with Google)
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || '',
 
-  // Apple OAuth (Sign in with Apple) — comma-separated list of accepted
-  // token audiences (Services ID for web, Bundle ID(s) for iOS apps).
-  APPLE_CLIENT_ID: process.env.APPLE_CLIENT_ID || '',
+  // Apple OAuth (Sign in with Apple) — accepted token audiences, each
+  // comma-separated: Bundle ID(s) for the iOS app, Services ID for the website.
+  APPLE_CLIENT_ID:     process.env.APPLE_CLIENT_ID     || '',
+  APPLE_WEB_CLIENT_ID: process.env.APPLE_WEB_CLIENT_ID || '',
 
   // JWT
   JWT_SECRET:         process.env.JWT_SECRET         || 'change_this_secret_in_production',

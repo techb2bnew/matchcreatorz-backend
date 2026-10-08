@@ -493,7 +493,10 @@ const googleAuth = async ({ credential, role }) => {
 //     (no token yet).
 const appleAuth = async ({ identity_token, id_token, user: appleUser, role }) => {
   const token = identity_token || id_token;
-  if (!env.APPLE_CLIENT_ID)
+  // iOS app (APPLE_CLIENT_ID) and website (APPLE_WEB_CLIENT_ID) tokens are both accepted
+  const allowedAudiences = [env.APPLE_CLIENT_ID, env.APPLE_WEB_CLIENT_ID]
+    .join(',').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!allowedAudiences.length)
     throw { statusCode: 500, message: 'Apple login is not configured on the server' };
   if (!token)
     throw { statusCode: 400, message: 'Apple identity token is required' };
@@ -506,7 +509,6 @@ const appleAuth = async ({ identity_token, id_token, user: appleUser, role }) =>
     throw { statusCode: 401, message: 'Invalid or expired Apple token' };
   }
 
-  const allowedAudiences = env.APPLE_CLIENT_ID.split(',').map((s) => s.trim()).filter(Boolean);
   if (!allowedAudiences.includes(payload.aud))
     throw { statusCode: 401, message: 'Apple token was issued for a different client' };
 
