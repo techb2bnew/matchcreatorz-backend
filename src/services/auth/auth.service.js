@@ -2,7 +2,7 @@
 const bcrypt   = require('bcryptjs');
 const jwt      = require('jsonwebtoken');
 const env      = require('../../config/env');
-const { User, SellerProfile, BuyerProfile } = require('../../models/index');
+const { User, SellerProfile, BuyerProfile, Category } = require('../../models/index');
 const { sendOtp }                = require('../../helpers/email.helper');
 const { sendPhoneOtp, checkPhoneOtp } = require('../../helpers/twilio.helper');
 const notify                     = require('../../helpers/notification.helper');
@@ -76,6 +76,8 @@ const register = async (data) => {
     // seller fields
     bio, skills, hourly_rate, address, profile_image,
     resume_url, portfolio_file_urls, portfolio_links,
+    // seller category — a listed one or a custom ("Other") one
+    category_id, custom_category,
     // buyer fields
     company_name,
   } = data;
@@ -113,6 +115,12 @@ const register = async (data) => {
     isPhoneVerified = true;
   }
 
+  // 1c. Seller's category must be a real one if given (custom text is free-form)
+  if (role === 'SELLER' && category_id) {
+    const cat = await Category.findByPk(category_id, { attributes: ['id'] });
+    if (!cat) throw { statusCode: 400, message: 'Selected category does not exist' };
+  }
+
   // 2. Hash password
   const hashed = await bcrypt.hash(password, 12);
 
@@ -134,6 +142,8 @@ const register = async (data) => {
       user_id:         user.id,
       bio:             bio                  || null,
       skills:          skills               || [],
+      category_id:     category_id          || null,
+      custom_category: (custom_category && custom_category.trim()) || null,
       hourly_rate:     hourly_rate          || 0,
       address:         address              || null,
       profile_image:   profile_image        || null,

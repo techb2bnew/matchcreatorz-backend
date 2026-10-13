@@ -181,6 +181,7 @@ router.get('/services', async (req, res, next) => {
       where[Op.or] = [
         { title:            { [Op.iLike]: `%${term}%` } },
         { description:      { [Op.iLike]: `%${term}%` } },
+        { custom_category:  { [Op.iLike]: `%${term}%` } },
         { '$seller.name$':  { [Op.iLike]: `%${term}%` } },
         literal(`EXISTS (SELECT 1 FROM jsonb_array_elements_text("Service"."tags") t WHERE t ILIKE '%${safe}%')`),
         literal(`"Service"."price"::text ILIKE '%${safe}%'`),

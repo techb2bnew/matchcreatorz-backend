@@ -70,6 +70,12 @@ const Service = sequelize.define('Service', {
     defaultValue: [],
   },
 
+  // Seller's own category when none of the listed ones fit ("Other")
+  custom_category: {
+    type:      DataTypes.STRING(100),
+    allowNull: true,
+  },
+
   // active = live, paused = seller hid it, rejected = admin blocked it
   status: {
     type:         DataTypes.ENUM('active', 'paused', 'rejected'),

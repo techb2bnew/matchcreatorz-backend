@@ -82,7 +82,11 @@ const authSchemas = {
     }),
 
     // ── Seller: optional ──────────────────────────
-    bio: Joi.string().max(500).optional(),
+    // optional — the signup form sends it empty when left blank
+    bio: Joi.string().max(500).allow('').optional(),
+    // Main category — one of the listed ones, or the seller's own ("Other")
+    category_id:     Joi.number().integer().positive().optional(),
+    custom_category: Joi.string().trim().max(100).allow('').optional(),
 
     // ── Buyer: optional ───────────────────────────
     company_name: Joi.string().max(150).optional(),

@@ -70,6 +70,7 @@ exports.searchServices = async (req, res) => {
       where[Op.or] = [
         { title:            { [Op.iLike]: `%${term}%` } },
         { description:      { [Op.iLike]: `%${term}%` } },
+        { custom_category:  { [Op.iLike]: `%${term}%` } },
         { '$seller.name$':  { [Op.iLike]: `%${term}%` } },
         // searchable tags (tags stored as JSONB array of strings)
         literal(`EXISTS (SELECT 1 FROM jsonb_array_elements_text("Service"."tags") t WHERE t ILIKE '%${safe}%')`),

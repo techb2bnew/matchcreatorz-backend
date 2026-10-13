@@ -29,6 +29,19 @@ const SellerProfile = sequelize.define('SellerProfile', {
     defaultValue: [],
   },
 
+  // Main category picked at signup — a listed one, or the seller's own ("Other")
+  category_id: {
+    type:       DataTypes.INTEGER,
+    allowNull:  true,
+    references: { model: 'categories', key: 'id' },
+    onDelete:   'SET NULL',
+  },
+
+  custom_category: {
+    type:      DataTypes.STRING(100),
+    allowNull: true,
+  },
+
   hourly_rate: {
     type:         DataTypes.DECIMAL(10, 2),
     allowNull:    true,
