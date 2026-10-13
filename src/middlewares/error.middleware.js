@@ -59,6 +59,10 @@ const errorHandler = (err, req, res, next) => {
   return res.status(statusCode).json({
     success: false,
     message,
+    // e.g. { code: 'ACCOUNT_NOT_VERIFIED', data: { email, has_phone } } so
+    // clients can react to a specific error instead of parsing the message
+    ...(statusCode < 500 && err.errorCode && { code: err.errorCode }),
+    ...(statusCode < 500 && err.data && { data: err.data }),
     ...(env.NODE_ENV !== 'production' && statusCode >= 500 && {
       debug: {
         name:    err.name    || null,

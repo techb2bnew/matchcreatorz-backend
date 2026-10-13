@@ -60,10 +60,19 @@ const signPhoneVerifyToken = (phone) =>
 
 const verifyPhoneVerifyToken = (token) => jwt.verify(token, env.JWT_SECRET);
 
+// ── Account verification ──────────────────────────────────────────────
+// An account counts as verified once EITHER its email or its phone number
+// has passed an OTP check — the user picks which at signup / on the
+// verify page.
+const isAccountVerified = (user) => !!(user.is_verified || user.is_phone_verified);
+
+// "+919876543210" → "•••• 3210" — enough for the user to recognise it
+const maskPhone = (p) => (p ? `•••• ${String(p).slice(-4)}` : null);
+
 // ── Register ──────────────────────────────────────────────────────────
 const register = async (data) => {
   const {
-    name, email, password, phone, role, phoneVerifyToken,
+    name, email, password, phone, role, phoneVerifyToken, verify_via = 'email',
     // seller fields
     bio, skills, hourly_rate, address, profile_image,
     resume_url, portfolio_file_urls, portfolio_links,
@@ -86,6 +95,9 @@ const register = async (data) => {
   // the Twilio Verify OTP flow — check the resulting token server-side and
   // cross-check the phone number it was issued for actually matches what
   // was submitted.
+  if (verify_via === 'phone' && !phone)
+    throw { statusCode: 400, message: 'Phone number is required to verify by phone' };
+
   let isPhoneVerified = false;
   if (phone) {
     if (!phoneVerifyToken)
@@ -139,33 +151,38 @@ const register = async (data) => {
     });
   }
 
-  // 5. Generate Email OTP → save → send (phone, if present, is already
-  // verified above via Firebase — no separate phone OTP round-trip needed)
-  const otp        = generateOtp();
-  const otp_expiry = new Date(Date.now() + env.OTP_EXPIRES_MIN * 60 * 1000);
+  // 5. Verify-by-email → generate Email OTP → save → send. Verify-by-phone
+  // needs nothing more: the phone OTP was already checked above.
+  if (verify_via === 'email') {
+    const otp        = generateOtp();
+    const otp_expiry = new Date(Date.now() + env.OTP_EXPIRES_MIN * 60 * 1000);
 
-  await user.update({ otp, otp_expiry });
+    await user.update({ otp, otp_expiry });
+
+    sendOtp(user.email, user.name, otp).catch(err =>
+      console.error('⚠️  OTP email failed:', err.message)
+    );
+  }
 
   // Fire-and-forget — don't fail registration if notifications fail
   notify.welcome(user);
   if (role === 'SELLER') notify.sellerRegistered(user);
   if (role === 'BUYER')  notify.buyerRegistered(user);
 
-  sendOtp(user.email, user.name, otp).catch(err =>
-    console.error('⚠️  OTP email failed:', err.message)
-  );
-
   // 6. Generate token
   const token = signToken({ id: user.id, email: user.email, role: user.role });
 
   return {
     token,
+    verify_via,
     user: {
-      id:          user.id,
-      name:        user.name,
-      email:       user.email,
-      role:        user.role,
-      is_verified: user.is_verified,
+      id:                user.id,
+      name:              user.name,
+      email:             user.email,
+      role:              user.role,
+      is_verified:       user.is_verified,
+      is_phone_verified: user.is_phone_verified,
+      account_verified:  isAccountVerified(user),
     },
   };
 };
@@ -186,6 +203,20 @@ const login = async ({ email, phone, password }) => {
 
   if (user.status === 'banned')   throw { statusCode: 403, message: 'Account is banned' };
   if (user.status === 'inactive') throw { statusCode: 403, message: 'Account is inactive' };
+
+  const valid = await bcrypt.compare(password, user.password);
+  if (!valid) throw { statusCode: 401, message: 'Invalid credentials' };
+
+  // Email or phone must be verified (OTP) before the account can sign in.
+  // Clients get the details they need to offer "send code to email / phone".
+  if (!isAccountVerified(user)) {
+    throw {
+      statusCode: 403,
+      errorCode:  'ACCOUNT_NOT_VERIFIED',
+      message:    'Please verify your account first. We can send a code to your email or phone.',
+      data: { email: user.email, has_phone: !!user.phone, phone_hint: maskPhone(user.phone) },
+    };
+  }
 
   // For sellers — block login if profile is rejected or pending
   if (user.role === 'SELLER') {
@@ -209,9 +240,6 @@ const login = async ({ email, phone, password }) => {
     }
   }
 
-  const valid = await bcrypt.compare(password, user.password);
-  if (!valid) throw { statusCode: 401, message: 'Invalid credentials' };
-
   // JWT token payload includes role
   const token = signToken({ id: user.id, email: user.email, role: user.role });
 
@@ -229,24 +257,33 @@ const login = async ({ email, phone, password }) => {
   };
 };
 
-// ── Verify OTP ───────────────────────────────────────────────────────
-const verifyOtp = async ({ email, otp }) => {
+// ── Verify OTP (account verification — by email or by phone) ─────────
+const verifyOtp = async ({ email, otp, via = 'email' }) => {
   const user = await User.findOne({ where: { email } });
   if (!user) throw { statusCode: 404, message: 'User not found' };
 
-  if (user.is_verified) throw { statusCode: 400, message: 'Email already verified' };
+  if (via === 'phone') {
+    if (!user.phone) throw { statusCode: 400, message: 'No phone number on this account' };
+    if (user.is_phone_verified) throw { statusCode: 400, message: 'Phone already verified' };
+    // Twilio Verify holds the code + expiry for the account's own number
+    const approved = await checkPhoneOtp(user.phone, otp);
+    if (!approved) throw { statusCode: 400, message: 'Invalid or expired OTP' };
+    await user.update({ is_phone_verified: true });
+  } else {
+    if (user.is_verified) throw { statusCode: 400, message: 'Email already verified' };
 
-  if (!user.otp || !user.otp_expiry)
-    throw { statusCode: 400, message: 'OTP not found. Please request a new one' };
+    if (!user.otp || !user.otp_expiry)
+      throw { statusCode: 400, message: 'OTP not found. Please request a new one' };
 
-  if (new Date() > new Date(user.otp_expiry))
-    throw { statusCode: 400, message: 'OTP expired. Please request a new one' };
+    if (new Date() > new Date(user.otp_expiry))
+      throw { statusCode: 400, message: 'OTP expired. Please request a new one' };
 
-  if (user.otp !== String(otp))
-    throw { statusCode: 400, message: 'Invalid OTP' };
+    if (user.otp !== String(otp))
+      throw { statusCode: 400, message: 'Invalid OTP' };
 
-  // Mark verified, clear OTP
-  await user.update({ is_verified: true, otp: null, otp_expiry: null });
+    // Mark verified, clear OTP
+    await user.update({ is_verified: true, otp: null, otp_expiry: null });
+  }
 
   const token = signToken({ id: user.id, email: user.email, role: user.role });
 
@@ -254,19 +291,29 @@ const verifyOtp = async ({ email, otp }) => {
     token,
     role: user.role,
     user: {
-      id:          user.id,
-      name:        user.name,
-      email:       user.email,
-      role:        user.role,
-      is_verified: true,
+      id:                user.id,
+      name:              user.name,
+      email:             user.email,
+      role:              user.role,
+      is_verified:       user.is_verified,
+      is_phone_verified: user.is_phone_verified,
+      account_verified:  true,
     },
   };
 };
 
-// ── Resend OTP ────────────────────────────────────────────────────────
-const resendOtp = async ({ email }) => {
+// ── Resend OTP (to the account's email, or by SMS to its phone) ────────
+const resendOtp = async ({ email, via = 'email' }) => {
   const user = await User.findOne({ where: { email } });
   if (!user) throw { statusCode: 404, message: 'User not found' };
+
+  if (via === 'phone') {
+    if (!user.phone) throw { statusCode: 400, message: 'No phone number on this account' };
+    if (user.is_phone_verified) throw { statusCode: 400, message: 'Phone already verified' };
+    await sendPhoneOtp(user.phone);
+    return { via: 'phone', phone_hint: maskPhone(user.phone) };
+  }
+
   if (user.is_verified) throw { statusCode: 400, message: 'Email already verified' };
 
   const otp        = generateOtp();
@@ -278,7 +325,7 @@ const resendOtp = async ({ email }) => {
     console.error('⚠️  OTP email failed:', err.message)
   );
 
-  return true;
+  return { via: 'email' };
 };
 
 // ── Logout ────────────────────────────────────────────────────────────

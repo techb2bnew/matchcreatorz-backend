@@ -264,7 +264,7 @@ const logout = async (req, res, next) => {
 const verifyOtp = async (req, res, next) => {
   try {
     const result = await authService.verifyOtp(req.body);
-    return response.success(res, 'Email verified successfully', result);
+    return response.success(res, req.body.via === 'phone' ? 'Phone verified successfully' : 'Email verified successfully', result);
   } catch (err) { next(err); }
 };
 
@@ -289,8 +289,8 @@ const verifyOtp = async (req, res, next) => {
  */
 const resendOtp = async (req, res, next) => {
   try {
-    await authService.resendOtp(req.body);
-    return response.success(res, 'OTP resent to your email');
+    const result = await authService.resendOtp(req.body);
+    return response.success(res, result.via === 'phone' ? 'OTP sent to your phone' : 'OTP resent to your email', result);
   } catch (err) { next(err); }
 };
 

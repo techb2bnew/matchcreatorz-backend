@@ -54,6 +54,9 @@ const authSchemas = {
     // required alongside phone — see auth.service.js register() for the
     // server-side check this gates (token from /verify-phone-otp)
     phoneVerifyToken: Joi.string().optional(),
+    // How the account is verified: an email OTP after signup (default), or
+    // the phone OTP already completed on the form (then phone is required).
+    verify_via:       Joi.string().valid('email', 'phone').default('email'),
     profile_image:    Joi.string().uri().optional(),
 
     // ── Seller: required when role = SELLER ───────
@@ -100,9 +103,17 @@ const authSchemas = {
     password: fields.password.required(),
   }),
 
+  // Account verification — `email` identifies the account; `via` picks where
+  // the code was sent (its email address, or the phone number on the account).
   verifyOtp: Joi.object({
     email: fields.email.required(),
     otp:   fields.otp.required(),
+    via:   Joi.string().valid('email', 'phone').default('email'),
+  }),
+
+  resendOtp: Joi.object({
+    email: fields.email.required(),
+    via:   Joi.string().valid('email', 'phone').default('email'),
   }),
 
   changePassword: Joi.object({

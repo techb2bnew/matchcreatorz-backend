@@ -54,7 +54,7 @@ router.post('/google',     google);
 router.post('/apple',      apple);
 router.post('/logout',     authenticate,                          logout);
 router.post('/verify-otp',       validateBody(authSchemas.verifyOtp),      verifyOtp);
-router.post('/resend-otp',       validateBody(authSchemas.forgotPassword),  resendOtp);
+router.post('/resend-otp',       validateBody(authSchemas.resendOtp),       resendOtp);
 
 // ── Phone OTP (Twilio Verify) — shared send, used by signup + forgot-password ──
 router.post('/send-phone-otp',    validateBody(authSchemas.sendPhoneOtp),    sendPhoneOtp);
