@@ -93,6 +93,23 @@ const register = async (data) => {
     throw { statusCode: 409, message: 'Email already registered' };
   }
 
+  // 1a. Same for the phone number — a deleted account keeps its phone, so it
+  // must block a new signup too (otherwise two accounts end up sharing one
+  // number and phone login picks the wrong one).
+  if (phone) {
+    const { Op } = require('sequelize');
+    const samePhone = await User.findOne({
+      where: { phone: { [Op.in]: [phone, normalizePhone(phone)] } },
+      order: [['deleted_at', 'ASC NULLS FIRST']],   // an active account wins over a deleted one
+      paranoid: false,
+    });
+    if (samePhone) {
+      if (samePhone.deletedAt || samePhone.deleted_at)
+        throw { statusCode: 409, message: 'This account has been deleted. Please contact support if you think this is a mistake.' };
+      throw { statusCode: 409, message: 'Phone number already registered' };
+    }
+  }
+
   // 1b. If a phone was entered, it must already be verified client-side via
   // the Twilio Verify OTP flow — check the resulting token server-side and
   // cross-check the phone number it was issued for actually matches what
@@ -201,10 +218,12 @@ const register = async (data) => {
 const login = async ({ email, phone, password }) => {
   if (!email && !phone) throw { statusCode: 400, message: 'Email or phone is required' };
 
-  // Find by email OR phone — paranoid:false so deleted users are also found
+  // Find by email OR phone — paranoid:false so deleted users are also found.
+  // If a phone number is shared by several rows (older data), the ACTIVE
+  // account is used; the "deleted" message only shows when none is active.
   const { Op } = require('sequelize');
-  const where = email ? { email } : { phone };
-  const user = await User.findOne({ where, paranoid: false });
+  const where = email ? { email } : { phone: { [Op.in]: [phone, normalizePhone(phone)] } };
+  const user = await User.findOne({ where, order: [['deleted_at', 'ASC NULLS FIRST']], paranoid: false });
   if (!user) throw { statusCode: 401, message: 'Invalid credentials' };
 
   // Soft-deleted account
