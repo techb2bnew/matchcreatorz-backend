@@ -1,14 +1,34 @@
 'use strict';
 const Joi = require('joi');
 
+// ── Password rule ───────────────────────────────────────────────────
+// One rule for every screen (web, mobile, admin): 8–128 characters with an
+// uppercase letter, a number and a symbol. Keep in sync with the frontend's
+// src/lib/password.ts. Messages never echo the submitted value.
+const PASSWORD_RULE_TEXT = 'Password must be at least 8 characters and include an uppercase letter, a number and a symbol';
+
+const passwordError = (password) => {
+  const pw = String(password || '');
+  if (pw.length > 128) return 'Password must be at most 128 characters';
+  if (pw.length < 8 || !/[A-Z]/.test(pw) || !/[0-9]/.test(pw) || !/[^A-Za-z0-9]/.test(pw))
+    return PASSWORD_RULE_TEXT;
+  return null;
+};
+
 // ── Reusable field rules ────────────────────────────────────────────
 
 const fields = {
   name:     Joi.string().min(2).max(80).trim(),
   email:    Joi.string().email({ tlds: { allow: false } }).lowercase().trim(),
   password: Joi.string().min(8).max(128)
-              .pattern(/[A-Z]/, 'one uppercase')
-              .pattern(/[0-9]/, 'one number'),
+              .pattern(/[A-Z]/)
+              .pattern(/[0-9]/)
+              .pattern(/[^A-Za-z0-9]/)
+              .messages({
+                'string.min':          PASSWORD_RULE_TEXT,
+                'string.pattern.base': PASSWORD_RULE_TEXT,
+                'string.max':          'Password must be at most 128 characters',
+              }),
   phone:    Joi.string().pattern(/^\+?[1-9]\d{9,14}$/).messages({
               'string.pattern.base': 'Phone number is invalid',
             }),
@@ -208,10 +228,13 @@ const validate = (schema, data) => {
   });
 
   if (error) {
-    const errors = error.details.map((d) => ({
-      field:   d.path.join('.'),
-      message: d.message.replace(/['"]/g, ''),
-    }));
+    const errors = error.details
+      .map((d) => ({
+        field:   d.path.join('.'),
+        message: d.message.replace(/['"]/g, ''),
+      }))
+      // one rule can fail several ways (e.g. password) with the same message
+      .filter((e, i, all) => all.findIndex((x) => x.field === e.field && x.message === e.message) === i);
     return { value: null, errors };
   }
 
@@ -219,6 +242,8 @@ const validate = (schema, data) => {
 };
 
 module.exports = {
+  PASSWORD_RULE_TEXT,
+  passwordError,
   fields,
   authSchemas,
   sellerSchemas,

@@ -2,7 +2,7 @@
 const bcrypt   = require('bcryptjs');
 const { User, SellerProfile } = require('../../models');
 const response = require('../../helpers/response.helper');
-const { fields: validationFields } = require('../../helpers/validation.helper');
+const { fields: validationFields, passwordError } = require('../../helpers/validation.helper');
 
 /**
  * @swagger
@@ -263,8 +263,8 @@ const changePassword = async (req, res, next) => {
     if (!current_password || !new_password)
       return response.badRequest(res, 'current_password and new_password are required');
 
-    if (new_password.length < 8)
-      return response.badRequest(res, 'New password must be at least 8 characters');
+    const pwError = passwordError(new_password);
+    if (pwError) return response.badRequest(res, pwError);
 
     const user = await User.findByPk(req.user.id);
     if (!user) return response.notFound(res, 'User not found');

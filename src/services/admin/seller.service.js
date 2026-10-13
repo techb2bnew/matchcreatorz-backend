@@ -4,6 +4,7 @@ const { Op, literal, fn, col, where: whereFn } = require('sequelize');
 const { User, SellerProfile, Booking, WalletTransaction } = require('../../models/index');
 const { sendAdminWelcome }    = require('../../helpers/email.helper');
 const notify                  = require('../../helpers/notification.helper');
+const { passwordError }       = require('../../helpers/validation.helper');
 
 const sellerInclude = {
   model:      SellerProfile,
@@ -129,6 +130,9 @@ const getSellerById = async (id) => {
 const addSeller = async ({ name, email, password, phone, bio, skills, hourly_rate, address, company_name }) => {
   const existing = await User.findOne({ where: { email } });
   if (existing) throw { statusCode: 409, message: 'Email already registered' };
+
+  const pwError = passwordError(password);
+  if (pwError) throw { statusCode: 400, message: pwError };
 
   const hashed = await bcrypt.hash(password, 12);
   const user   = await User.create({ name, email, password: hashed, phone: phone || null, role: 'SELLER', status: 'active', is_verified: true, address: address || null });

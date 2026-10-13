@@ -3,6 +3,7 @@ const bcrypt     = require('bcryptjs');
 const { User, BuyerProfile, Booking, WalletTransaction } = require('../../models/index');
 const { sendAdminWelcome }   = require('../../helpers/email.helper');
 const notify                 = require('../../helpers/notification.helper');
+const { passwordError }      = require('../../helpers/validation.helper');
 
 // A buyer's real spend isn't `wallet.total_out` — that only tracks money
 // debited from their in-app wallet BALANCE, which escrow-mode bookings never
@@ -182,6 +183,9 @@ const getBuyerById = async (id) => {
 const addBuyer = async ({ name, email, password, phone, company_name, address }) => {
   const existing = await User.findOne({ where: { email } });
   if (existing) throw { statusCode: 409, message: 'Email already registered' };
+
+  const pwError = passwordError(password);
+  if (pwError) throw { statusCode: 400, message: pwError };
 
   const hashed = await bcrypt.hash(password, 12);
   const user   = await User.create({ name, email, password: hashed, phone: phone || null, role: 'BUYER', status: 'active', is_verified: true, address: address || null });
